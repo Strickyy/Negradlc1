@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.negradlc.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["LightmapTextureManagerMixin"],
+  "injectors": { "defaultRequire": 1 }
+}

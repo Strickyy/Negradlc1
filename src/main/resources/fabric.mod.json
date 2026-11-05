@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "negradlc",
+  "version": "${version}",
+  "name": "Negradlc",
+  "description": "Configurable combat, movement and HUD client for Minecraft 1.21.4.",
+  "authors": ["Negradlc"],
+  "environment": "client",
+  "entrypoints": { "client": ["dev.negradlc.NegradlcClient"] },
+  "mixins": ["negradlc.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
