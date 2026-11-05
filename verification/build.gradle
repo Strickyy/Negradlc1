@@ -17,6 +17,7 @@ sourceSets {
             include 'dev/negradlc/config/**'
             include 'dev/negradlc/combat/CombatMath.java'
             include 'dev/negradlc/combat/FallTracker.java'
+            include 'dev/negradlc/combat/RotationStepper.java'
             include 'dev/negradlc/movement/MovementMath.java'
             include 'dev/negradlc/input/BindingCodes.java'
             include 'dev/negradlc/input/WheelAccumulator.java'

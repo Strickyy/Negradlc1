@@ -5,6 +5,7 @@ import dev.negradlc.input.BindingCodes;
 import dev.negradlc.sound.SoundFeedback;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import org.lwjgl.glfw.GLFW;
@@ -28,7 +29,12 @@ public final class NegradlcScreen extends Screen {
     private final ClientConfig config;
     private final Runnable save;
     private final List<Card> cards = new ArrayList<>();
-    private final Set<String> expanded = new HashSet<>(Set.of("killAura", "aimAssist"));
+    private static final Set<String> expanded = new HashSet<>(Set.of("killAura", "aimAssist", "targets", "bindings", "workspace"));
+    private static final double[] rememberedScroll = new double[4];
+    private static int rememberedCategory;
+    private TextFieldWidget search;
+    private String query = "";
+    private int searchX, searchWidth;
     private final Map<String, Float> switchAnimation = new HashMap<>();
     private int category, x, y, w, h, sidebar, contentX, contentY, contentWidth, contentHeight;
     private double scroll, maxScroll, dragX, dragY;
@@ -42,6 +48,8 @@ public final class NegradlcScreen extends Screen {
         super(Text.literal("Negradlc"));
         this.config = config;
         this.save = save;
+        category = rememberedCategory;
+        scroll = rememberedScroll[category];
     }
 
     @Override protected void init() {
@@ -51,6 +59,14 @@ public final class NegradlcScreen extends Screen {
         }
         constrain();
         buildCards();
+        String previousSearch = search == null ? query : search.getText();
+        search = new TextFieldWidget(textRenderer, 0, 0, 100, 16, Text.literal("Search this tab"));
+        search.setMaxLength(40);
+        search.setPlaceholder(Text.literal("Search tab..."));
+        search.setText(previousSearch);
+        query = previousSearch;
+        search.setChangedListener(value -> { query = value; scroll = 0; slider = null; });
+        positionSearch();
     }
 
     private void constrain() {
@@ -66,11 +82,43 @@ public final class NegradlcScreen extends Screen {
         contentWidth = Math.max(60, w - sidebar - 20); contentHeight = Math.max(45, h - 61);
     }
 
+    private void positionSearch() {
+        searchWidth = Math.max(55, Math.min(130, contentWidth - 85));
+        searchX = x + w - 44 - searchWidth;
+        if (search != null) {
+            search.setX(searchX); search.setY(y + 7); search.setWidth(searchWidth);
+        }
+    }
+
+    private List<Card> visibleCards() {
+        String term = query.strip().toLowerCase(Locale.ROOT);
+        if (term.isEmpty()) return cards;
+        return cards.stream().filter(card -> (card.title + " " + card.description).toLowerCase(Locale.ROOT).contains(term)
+                || card.controls.stream().anyMatch(c -> (c.title + " " + c.description).toLowerCase(Locale.ROOT).contains(term))).toList();
+    }
+
+    private boolean open(Card card) { return expanded.contains(card.id) || !query.isBlank(); }
+    private void remember() { rememberedCategory = category; rememberedScroll[category] = scroll; }
+
     private void buildCards() {
         cards.clear();
         switch (category) {
             case 0 -> {
-                Card aura = module("killAura", "KillAura", "Closest eligible target", () -> config.killAura, () -> config.killAura = !config.killAura);
+                Card aura = module("killAura", "KillAura", "Independent rotation and targeting", () -> config.killAura, () -> config.killAura = !config.killAura);
+                choice(aura, "Rotation", "Snap: turn only for attacks. Snap Legit: bounded burst. Smooth: continuous eased turn.",
+                        () -> modeName(config.auraRotation), () -> { config.auraRotation = next(config.auraRotation, "SNAP", "SNAP_LEGIT", "SMOOTH"); slider = null; });
+                note(aura, "Turns only for hits", "Instant rotation near attack readiness; does not follow during recharge").visible = () -> "SNAP".equals(config.auraRotation);
+                note(aura, "Bounded attack bursts", "Limited turn bursts with optional return; independent of Aim Assist").visible = () -> "SNAP_LEGIT".equals(config.auraRotation);
+                note(aura, "Continuous eased turn", "Smooth acceleration and a stable target; independent of Aim Assist").visible = () -> "SMOOTH".equals(config.auraRotation);
+                choice(aura, "Aim point", "Body point used only by KillAura", () -> config.auraAimPoint, () -> config.auraAimPoint = next(config.auraAimPoint, "CHEST", "HEAD", "NEAREST"));
+                range(aura, "Yaw speed", "Maximum horizontal rotation in degrees per tick", 1, 90, 1, () -> config.auraYawSpeed, v -> config.auraYawSpeed = v).visible = () -> !"SNAP".equals(config.auraRotation);
+                range(aura, "Pitch speed", "Maximum vertical rotation in degrees per tick", 1, 90, 1, () -> config.auraPitchSpeed, v -> config.auraPitchSpeed = v).visible = () -> !"SNAP".equals(config.auraRotation);
+                range(aura, "Smoothing", "Turn easing; lower values feel softer", .05, 1, .05, () -> config.auraSmoothing, v -> config.auraSmoothing = v).visible = () -> !"SNAP".equals(config.auraRotation);
+                range(aura, "Acceleration", "Maximum change of turn speed per tick", .5, 30, .5, () -> config.auraAcceleration, v -> config.auraAcceleration = v).visible = () -> "SMOOTH".equals(config.auraRotation);
+                range(aura, "Deadzone", "Stop tiny rotations near the target", 0, 2, .05, () -> config.auraDeadzone, v -> config.auraDeadzone = v).visible = () -> !"SNAP".equals(config.auraRotation);
+                toggle(aura, "Return view", "Return to your original view after an attack", () -> config.auraReturnView, () -> config.auraReturnView = !config.auraReturnView).visible = () -> !"SMOOTH".equals(config.auraRotation);
+                toggle(aura, "Lock target", "Keep the same valid target instead of switching every tick", () -> config.auraLockTarget, () -> config.auraLockTarget = !config.auraLockTarget);
+                choice(aura, "Priority", "Choose the nearest, closest to crosshair, or lowest-health target", () -> priorityName(config.auraPriority), () -> config.auraPriority = next(config.auraPriority, "DISTANCE", "CROSSHAIR", "HEALTH"));
                 toggle(aura, "Crit only", "Only attack while falling; grounded hits wait", () -> config.critOnly, () -> config.critOnly = !config.critOnly);
                 toggle(aura, "Auto crit jump", "Jump normally when a critical hit is needed", () -> config.autoCritJump, () -> config.autoCritJump = !config.autoCritJump);
                 range(aura, "Distance", "Melee reach in blocks", 1, 3, .1, () -> config.attackRange, v -> config.attackRange = v);
@@ -83,9 +131,14 @@ public final class NegradlcScreen extends Screen {
                 range(aim, "Yaw speed", "Maximum horizontal turn per tick", .1, 30, .1, () -> config.aimSpeed, v -> config.aimSpeed = v);
                 range(aim, "Pitch speed", "Maximum vertical turn per tick", .1, 30, .1, () -> config.aimPitchSpeed, v -> config.aimPitchSpeed = v);
                 range(aim, "Smoothing", "Blend of turn towards the target", .05, 1, .05, () -> config.aimSmoothing, v -> config.aimSmoothing = v);
+                range(aim, "Acceleration", "Maximum change of aim turn speed per tick", .1, 15, .1, () -> config.aimAcceleration, v -> config.aimAcceleration = v);
+                range(aim, "Deadzone", "Stop tiny aim corrections at the target", 0, 2, .05, () -> config.aimDeadzone, v -> config.aimDeadzone = v);
                 toggle(aim, "Hold attack", "Assist only while holding the attack key", () -> config.requireAttackKey, () -> config.requireAttackKey = !config.requireAttackKey);
                 toggle(aim, "Visible only", "Ignore targets hidden by blocks when aiming", () -> config.aimVisibleOnly, () -> config.aimVisibleOnly = !config.aimVisibleOnly);
+                toggle(aim, "Target lock", "Keep a valid target instead of switching between nearby entities", () -> config.aimLockTarget, () -> config.aimLockTarget = !config.aimLockTarget);
                 Card trigger = module("triggerBot", "TriggerBot", "Target must be under the crosshair", () -> config.triggerBot, () -> config.triggerBot = !config.triggerBot);
+                toggle(trigger, "Smooth aim", "Optional pre-aim uses Aim Assist settings, including Hold attack; attacks still require the crosshair", () -> config.smoothTriggerAim, () -> config.smoothTriggerAim = !config.smoothTriggerAim);
+                range(trigger, "Aim cone", "Smooth pre-aim cone; uses Aim Assist speed and smoothing settings", 5, 90, 5, () -> config.triggerAimFov, v -> config.triggerAimFov = v).visible = () -> config.smoothTriggerAim;
                 toggle(trigger, "Crit only", "Shared with KillAura: waits for a real falling crit", () -> config.critOnly, () -> config.critOnly = !config.critOnly);
                 toggle(trigger, "Auto crit jump", "Shared automatic jump for critical attacks", () -> config.autoCritJump, () -> config.autoCritJump = !config.autoCritJump);
                 range(trigger, "Recharge", "Shared vanilla attack cooldown threshold", .1, 1, .01, () -> config.attackCooldown, v -> config.attackCooldown = v);
@@ -157,11 +210,11 @@ public final class NegradlcScreen extends Screen {
         return card;
     }
     private Card panel(String id, String title, String description) { return module(id, title, description, null, null); }
-    private void toggle(Card card, String title, String description, BooleanSupplier state, Runnable action) {
-        Control c = new Control(Kind.TOGGLE, title, description); c.state = state; c.action = action; card.controls.add(c);
+    private Control toggle(Card card, String title, String description, BooleanSupplier state, Runnable action) {
+        Control c = new Control(Kind.TOGGLE, title, description); c.state = state; c.action = action; card.controls.add(c); return c;
     }
-    private void range(Card card, String title, String description, double min, double max, double step, DoubleSupplier value, DoubleConsumer setter) {
-        Control c = new Control(Kind.SLIDER, title, description); c.min = min; c.max = max; c.step = step; c.value = value; c.setter = setter; card.controls.add(c);
+    private Control range(Card card, String title, String description, double min, double max, double step, DoubleSupplier value, DoubleConsumer setter) {
+        Control c = new Control(Kind.SLIDER, title, description); c.min = min; c.max = max; c.step = step; c.value = value; c.setter = setter; card.controls.add(c); return c;
     }
     private void action(Card card, String title, String description, Runnable action) {
         Control c = new Control(Kind.ACTION, title, description); c.action = action; card.controls.add(c);
@@ -169,22 +222,24 @@ public final class NegradlcScreen extends Screen {
     private void choice(Card card, String title, String description, Supplier<String> value, Runnable cycle) {
         Control c = new Control(Kind.CHOICE, title, description); c.choice = value; c.action = cycle; card.controls.add(c);
     }
-    private void note(Card card, String title, String description) { card.controls.add(new Control(Kind.NOTE, title, description)); }
+    private Control note(Card card, String title, String description) { Control c = new Control(Kind.NOTE, title, description); card.controls.add(c); return c; }
 
     private void layout() {
         boolean twoColumns = contentWidth >= 284;
         int columns = twoColumns ? 2 : 1, gap = 8;
         int columnWidth = (contentWidth - (columns - 1) * gap) / columns;
         int[] bottoms = new int[columns];
-        for (int i = 0; i < cards.size(); i++) {
-            Card card = cards.get(i);
+        List<Card> shown = visibleCards();
+        for (int i = 0; i < shown.size(); i++) {
+            Card card = shown.get(i);
             int column = i % columns;
             card.x = contentX + column * (columnWidth + gap);
             card.y = contentY + bottoms[column] - (int) scroll;
             card.width = columnWidth;
             int cursor = 36;
-            boolean open = card.enabled == null || expanded.contains(card.id);
+            boolean open = open(card);
             for (Control c : card.controls) {
+                if (!c.visible.getAsBoolean()) continue;
                 c.x = card.x + 9; c.y = card.y + cursor; c.width = columnWidth - 18;
                 if (open) cursor += c.height();
             }
@@ -202,16 +257,16 @@ public final class NegradlcScreen extends Screen {
         long now = System.nanoTime();
         frameBlend = frameNanos == 0 ? 1 : (float) (1 - Math.exp(-Math.min(.1, (now - frameNanos) / 1e9) * 16));
         frameNanos = now;
-        constrain(); layout();
+        constrain(); positionSearch(); layout();
         draw.fill(0, 0, width, height, 0x30080D09);
         rounded(draw, x - 4, y - 3, w + 8, h + 8, 0x30000000);
         rounded(draw, x, y, w, h, 0xD8151C15);
         draw.fill(x + 1, y + 1, x + sidebar, y + h - 1, 0x70313D27);
         draw.fill(x + sidebar, y + 10, x + sidebar + 1, y + h - 11, 0x283F6650);
         draw.fill(x + sidebar + 9, y + 26, x + w - 12, y + 27, 0x30496857);
-        text(draw, "NEGRADLC", contentX, y + 12, WHITE);
-        String version = "1.21.4";
-        text(draw, version, x + w - textRenderer.getWidth(version) - 35, y + 12, MUTED);
+        text(draw, textRenderer.trimToWidth("NEGRADLC", Math.max(15, searchX - contentX - 9)), contentX, y + 12, WHITE);
+        if (search != null) search.render(draw, mouseX, mouseY, delta);
+        text(draw, query.isBlank() ? "⌕" : "×", searchX + searchWidth + 5, y + 11, MUTED);
         text(draw, "×", x + w - 22, y + 11, inside(mouseX, mouseY, x + w - 29, y + 5, 23, 22) ? WHITE : MUTED);
         crescent(draw, x + sidebar / 2, y + 34, 17, ACCENT);
         for (int i = 0; i < CATEGORIES.length; i++) {
@@ -223,7 +278,7 @@ public final class NegradlcScreen extends Screen {
         }
         draw.enableScissor(contentX - 1, contentY, contentX + contentWidth + 1, contentY + contentHeight);
         String hoveredDescription = null;
-        for (Card card : cards) {
+        for (Card card : visibleCards()) {
             if (card.y + card.height < contentY || card.y > contentY + contentHeight) continue;
             boolean hover = inside(mouseX, mouseY, card.x, card.y, card.width, 33) && mouseY >= contentY && mouseY < contentY + contentHeight;
             rounded(draw, card.x, card.y, card.width, card.height, hover ? 0xD2151B16 : 0xB80B110D);
@@ -232,23 +287,29 @@ public final class NegradlcScreen extends Screen {
             String bind = card.enabled == null ? "" : card.id.equals(pendingBind) ? "..." : BindingCodes.label(config.binds.getOrDefault(card.id, -1));
             if ("NONE".equalsIgnoreCase(bind) || "UNBOUND".equalsIgnoreCase(bind)) bind = "—";
             int right = card.x + card.width - 9;
-            String suffix = (card.controls.isEmpty() ? "" : (card.enabled == null || expanded.contains(card.id) ? "−" : "+"));
+            String suffix = (card.controls.isEmpty() ? "" : (open(card) ? "−" : "+"));
             if (!suffix.isEmpty()) { text(draw, suffix, right - 6, card.y + 9, MUTED); right -= 15; }
             if (!bind.isEmpty()) {
                 String shownBind = textRenderer.trimToWidth(bind, Math.max(18, card.width / 3));
+                rounded(draw, right - textRenderer.getWidth(shownBind) - 3, card.y + 7, textRenderer.getWidth(shownBind) + 6, 13, card.id.equals(pendingBind) ? 0x503F9C80 : 0x3834473C);
                 text(draw, shownBind, right - textRenderer.getWidth(shownBind), card.y + 10, card.id.equals(pendingBind) ? ACCENT : MUTED);
                 right -= textRenderer.getWidth(shownBind) + 8;
             }
             text(draw, textRenderer.trimToWidth(card.title, Math.max(18, right - card.x - 9)), card.x + 9, card.y + 9, enabled ? WHITE : MUTED);
             text(draw, textRenderer.trimToWidth(card.description, Math.max(10, card.width - 18)), card.x + 9, card.y + 23, 0xFF687E6E);
             if (hover) hoveredDescription = card.description + (card.enabled == null ? "" : " · LMB toggle / RMB settings / MMB bind");
-            if (card.enabled == null || expanded.contains(card.id)) {
+            if (open(card)) {
                 for (Control control : card.controls) {
+                    if (!control.visible.getAsBoolean()) continue;
                     if (control.y + control.height() < contentY || control.y >= contentY + contentHeight) continue;
                     renderControl(draw, control, mouseX, mouseY);
                     if (inside(mouseX, mouseY, control.x, control.y, control.width, control.height()) && mouseY >= contentY && mouseY < contentY + contentHeight) hoveredDescription = control.description;
                 }
             }
+        }
+        if (visibleCards().isEmpty()) {
+            draw.drawCenteredTextWithShadow(textRenderer, "No modules match", contentX + contentWidth / 2, contentY + 28, MUTED);
+            draw.drawCenteredTextWithShadow(textRenderer, "Clear search or change tab", contentX + contentWidth / 2, contentY + 44, MUTED);
         }
         draw.disableScissor();
         if (maxScroll > 0) {
@@ -298,6 +359,12 @@ public final class NegradlcScreen extends Screen {
         } else if (c.kind == Kind.ACTION) text(draw, ">", c.x + c.width - 6, c.y + 5, ACCENT);
     }
 
+    private static String modeName(String mode) {
+        return switch (mode) { case "SNAP" -> "Snap"; case "SNAP_LEGIT" -> "Snap Legit"; default -> "Smooth"; };
+    }
+    private static String priorityName(String priority) {
+        return switch (priority) { case "CROSSHAIR" -> "Crosshair"; case "HEALTH" -> "Health"; default -> "Distance"; };
+    }
     private static String format(Control c) { return String.format(Locale.ROOT, c.step >= 1 ? "%.0f" : c.step >= .1 ? "%.1f" : "%.2f", c.value.getAsDouble()); }
     private static String next(String current, String... values) {
         for (int i = 0; i < values.length; i++) if (values[i].equals(current)) return values[(i + 1) % values.length];
@@ -314,21 +381,27 @@ public final class NegradlcScreen extends Screen {
 
     @Override public boolean mouseClicked(double mx, double my, int button) {
         if (pendingBind != null) { capture(BindingCodes.mouse(button)); return true; }
-        constrain(); layout();
+        constrain(); positionSearch(); layout();
+        if (button == 0 && inside(mx, my, searchX + searchWidth + 1, y + 5, 15, 20)) {
+            search.setText(""); search.setFocused(true); return true;
+        }
+        if (search != null && search.mouseClicked(mx, my, button)) return true;
+        if (search != null) search.setFocused(false);
         if (button == 0 && inside(mx, my, x + w - 29, y + 5, 23, 22)) { close(); return true; }
         if (button == 0 && inside(mx, my, x + w - 15, y + h - 15, 15, 15)) { resizing = true; dragX = mx - w; dragY = my - h; return true; }
         if (button == 0 && inside(mx, my, x, y, w, 30)) { dragging = true; dragX = mx - x; dragY = my - y; return true; }
         for (int i = 0; i < CATEGORIES.length; i++) if (button == 0 && inside(mx, my, x + 5, y + 64 + i * 29, sidebar - 10, 25)) {
-            category = i; scroll = 0; slider = null; buildCards(); click(); return true;
+            remember(); category = i; rememberedCategory = i; scroll = query.isBlank() ? rememberedScroll[i] : 0; slider = null; buildCards(); click(); return true;
         }
         if (!inside(mx, my, contentX, contentY, contentWidth, contentHeight)) return inside(mx, my, x, y, w, h) || super.mouseClicked(mx, my, button);
-        for (Card card : cards) {
+        for (Card card : visibleCards()) {
             if (inside(mx, my, card.x, card.y, card.width, 36)) {
                 if (button == 2 && card.enabled != null) { pendingBind = card.id; click(); return true; }
-                if (button == 1 || button == 0 && card.enabled == null) {
-                    if (!card.controls.isEmpty()) { if (!expanded.remove(card.id)) expanded.add(card.id); click(); }
+                if (button == 1 || button == 0 && !card.controls.isEmpty() && mx >= card.x + card.width - 25) {
+                    if (!card.controls.isEmpty()) { if (!expanded.remove(card.id)) expanded.add(card.id); slider = null; click(); }
                     return true;
                 }
+                if (button == 0 && card.enabled == null) return true;
                 if (button == 0 && card.toggle != null) {
                     boolean nextState = !card.enabled.getAsBoolean();
                     if ("toggleSounds".equals(card.id) && !nextState) SoundFeedback.playToggle(client, false, config);
@@ -337,8 +410,8 @@ public final class NegradlcScreen extends Screen {
                     save.run(); return true;
                 }
             }
-            if (card.enabled != null && !expanded.contains(card.id)) continue;
-            for (Control c : card.controls) if (button == 0 && inside(mx, my, c.x, c.y, c.width, c.height())) {
+            if (!open(card)) continue;
+            for (Control c : card.controls) if (c.visible.getAsBoolean() && button == 0 && inside(mx, my, c.x, c.y, c.width, c.height())) {
                 if (c.kind == Kind.SLIDER) { slider = c; changeSlider(mx); click(); return true; }
                 if (c.action != null) { c.action.run(); click(); save.run(); return true; }
             }
@@ -382,9 +455,20 @@ public final class NegradlcScreen extends Screen {
             capture(code == GLFW.GLFW_KEY_DELETE || code == GLFW.GLFW_KEY_BACKSPACE ? BindingCodes.UNBOUND : code);
             return true;
         }
+        if (code == GLFW.GLFW_KEY_F && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            search.setFocused(true); return true;
+        }
+        if (search != null && search.isFocused()) {
+            if (code == GLFW.GLFW_KEY_ESCAPE) { search.setText(""); search.setFocused(false); return true; }
+            return search.keyPressed(code, scanCode, modifiers) || code != GLFW.GLFW_KEY_ESCAPE;
+        }
         return super.keyPressed(code, scanCode, modifiers);
     }
-    @Override public void close() { save.run(); if (client != null) client.setScreen(null); }
+    @Override public boolean charTyped(char chr, int modifiers) {
+        return pendingBind == null && search != null && search.isFocused() && search.charTyped(chr, modifiers) || super.charTyped(chr, modifiers);
+    }
+    @Override public void close() { remember(); save.run(); if (client != null) client.setScreen(null); }
+    @Override public void removed() { remember(); }
     @Override public boolean shouldPause() { return false; }
     private void text(DrawContext draw, String text, int x, int y, int color) { draw.drawTextWithShadow(textRenderer, text, x, y, color); }
     private static boolean inside(double mx, double my, int x, int y, int width, int height) { return mx >= x && mx < x + width && my >= y && my < y + height; }
@@ -415,6 +499,7 @@ public final class NegradlcScreen extends Screen {
         final Kind kind;
         final String title, description;
         BooleanSupplier state;
+        BooleanSupplier visible = () -> true;
         Runnable action;
         DoubleSupplier value;
         DoubleConsumer setter;

@@ -32,6 +32,13 @@ public final class CombatController {
     private final FallTracker fallTracker = new FallTracker();
     private ClientPlayerEntity trackedPlayer;
     private Object trackedWorld;
+    private LivingEntity auraTarget, aimTarget;
+    private final RotationStepper auraStepper = new RotationStepper();
+    private final RotationStepper aimStepper = new RotationStepper();
+    private final RotationStepper returnStepper = new RotationStepper();
+    private String activeMode;
+    private boolean burstActive, savedView, returningView;
+    private float viewYaw, viewPitch, lastAppliedYaw, lastAppliedPitch;
 
     public String getStatus() { return status; }
 
@@ -46,6 +53,9 @@ public final class CombatController {
         fallTracker.reset();
         trackedPlayer = null;
         trackedWorld = null;
+        clearAuraMotion();
+        aimTarget = null;
+        aimStepper.reset();
     }
 
     public void tick(MinecraftClient client, ClientConfig config) {
@@ -58,6 +68,9 @@ public final class CombatController {
             status = "Paused";
             sprintStoppedAt = -1;
             fallTracker.reset();
+            clearAuraMotion();
+            aimTarget = null;
+            aimStepper.reset();
             return;
         }
         if (!config.killAura && !config.triggerBot && !config.aimAssist) { reset(); return; }
@@ -65,14 +78,50 @@ public final class CombatController {
             fallTracker.reset();
             trackedPlayer = client.player;
             trackedWorld = client.world;
+            clearAuraMotion();
+            aimTarget = null;
+            aimStepper.reset();
         }
         // In 1.21.4 Entity.move skips fall() for player-controlled entities.
         // Observe real descent instead of requiring the often-zero client fallDistance.
         float observedFall = fallTracker.sample(client.player.getY(), client.player.isOnGround());
 
+        if (!java.util.Objects.equals(activeMode, config.auraRotation)) {
+            clearAuraMotion();
+            activeMode = config.auraRotation;
+        }
+        if (savedView) {
+            // Keep mouse input made during a burst instead of returning to a stale view.
+            viewYaw += CombatMath.wrapDegrees(client.player.getYaw() - lastAppliedYaw);
+            viewPitch = CombatMath.clampPitch(viewPitch + client.player.getPitch() - lastAppliedPitch);
+            lastAppliedYaw = client.player.getYaw(); lastAppliedPitch = client.player.getPitch();
+        }
+        if (savedView && !config.auraReturnView) { savedView = false; returningView = false; }
+        if (returningView || !config.killAura && savedView) {
+            returnView(client, config);
+            status = "Returning view";
+            return;
+        }
+        if (!config.killAura) clearAuraMotion();
+
         double attackRange = Math.max(0.0, config.attackRange);
         if (config.killAura) {
-            target = closest(client, config, attackRange, config.auraFov, true);
+            LivingEntity next = config.auraLockTarget && auraTarget != null
+                    && eligible(client, config, auraTarget, attackRange, true)
+                    && CombatMath.insideFov(client.player.getYaw(), rotation(client, config.auraAimPoint, auraTarget).yaw(), config.auraFov)
+                    ? auraTarget : closest(client, config, attackRange, config.auraFov, true, true);
+            if (next != auraTarget) {
+                auraStepper.reset();
+                burstActive = false;
+                if (savedView) {
+                    returningView = true;
+                    auraTarget = next;
+                    returnView(client, config);
+                    status = "Returning view";
+                    return;
+                }
+            }
+            target = auraTarget = next;
         } else if (config.triggerBot && client.crosshairTarget instanceof EntityHitResult hit
                 && hit.getEntity() instanceof LivingEntity living
                 && eligible(client, config, living, attackRange, true)) {
@@ -81,15 +130,30 @@ public final class CombatController {
 
         LivingEntity attackTarget = target;
         if (config.killAura && target != null) {
-            // AimAssist provides the turn-speed setting; otherwise Aura turns directly.
-            rotate(client, config, target, config.aimAssist);
-        } else if (config.aimAssist && (!config.requireAttackKey || client.options.attackKey.isPressed())) {
-            LivingEntity aimTarget = closest(client, config, Math.max(0.0, config.aimRange), config.aimFov, config.aimVisibleOnly);
-            if (aimTarget != null) {
-                rotate(client, config, aimTarget, true);
+            aimTarget = null;
+            aimStepper.reset();
+            boolean smooth = "SMOOTH".equals(config.auraRotation);
+            boolean ready = client.player.getAttackCooldownProgress(0.0f) >= config.attackCooldown;
+            boolean criticalTurnWindow = !config.critOnly || client.player.isOnGround()
+                    || observedFall > 0 && client.player.getVelocity().y < 0;
+            if (smooth || (ready || burstActive) && criticalTurnWindow) rotateAura(client, config, target);
+        } else if (!config.killAura && (config.aimAssist || config.triggerBot && config.smoothTriggerAim)
+                && (!config.requireAttackKey || client.options.attackKey.isPressed())) {
+            double fov = config.triggerBot && config.smoothTriggerAim ? Math.min(config.aimFov, config.triggerAimFov) : config.aimFov;
+            LivingEntity next = config.aimLockTarget && aimTarget != null
+                    && eligible(client, config, aimTarget, config.aimRange, config.aimVisibleOnly)
+                    && CombatMath.insideFov(client.player.getYaw(), rotation(client, config.aimPoint, aimTarget).yaw(), fov)
+                    ? aimTarget : closest(client, config, Math.max(0.0, config.aimRange), fov, config.aimVisibleOnly, false);
+            if (next != aimTarget) aimStepper.reset();
+            aimTarget = next;
+            if (next != null) {
+                rotateAim(client, config, next);
                 status = "Aiming";
-                target = aimTarget;
+                target = next;
             }
+        } else {
+            aimTarget = null;
+            aimStepper.reset();
         }
 
         if (attackTarget == null || (!config.killAura && !config.triggerBot)) {
@@ -148,16 +212,27 @@ public final class CombatController {
         client.interactionManager.attackEntity(client.player, attackTarget);
         client.player.swingHand(Hand.MAIN_HAND);
         status = config.critOnly ? "Critical attack" : "Attack";
+        if (config.killAura && !"SMOOTH".equals(config.auraRotation)) {
+            burstActive = false;
+            returningView = savedView;
+            returnStepper.reset();
+        }
     }
 
-    private LivingEntity closest(MinecraftClient client, ClientConfig config, double range, double fov, boolean requireVisibility) {
+    private LivingEntity closest(MinecraftClient client, ClientConfig config, double range, double fov, boolean requireVisibility, boolean aura) {
+        Comparator<LivingEntity> distance = Comparator.comparingDouble(entity -> distanceSquared(client.player.getEyePos(), entity.getBoundingBox()));
+        Comparator<LivingEntity> priority = !aura ? distance : switch (config.auraPriority) {
+            case "HEALTH" -> Comparator.comparingDouble((LivingEntity entity) -> entity.getHealth() + entity.getAbsorptionAmount()).thenComparing(distance);
+            case "CROSSHAIR" -> Comparator.comparingDouble((LivingEntity entity) -> Math.abs(CombatMath.wrapDegrees(
+                    rotation(client, config.auraAimPoint, entity).yaw() - client.player.getYaw()))).thenComparing(distance);
+            default -> distance;
+        };
         return client.world.getEntitiesByClass(LivingEntity.class,
                         client.player.getBoundingBox().expand(range + 1.0),
                         entity -> eligible(client, config, entity, range, requireVisibility)
                                 && CombatMath.insideFov(client.player.getYaw(),
-                                rotation(client, config, entity).yaw(), fov))
-                .stream().min(Comparator.comparingDouble(entity -> distanceSquared(client.player.getEyePos(),
-                        entity.getBoundingBox()))).orElse(null);
+                                rotation(client, aura ? config.auraAimPoint : config.aimPoint, entity).yaw(), fov))
+                .stream().min(priority.thenComparingInt(Entity::getId)).orElse(null);
     }
 
     private boolean eligible(MinecraftClient client, ClientConfig config, LivingEntity entity, double range, boolean requireVisibility) {
@@ -174,17 +249,17 @@ public final class CombatController {
                 ? config.targetHostile : config.targetPassive;
     }
 
-    private CombatMath.Rotation rotation(MinecraftClient client, ClientConfig config, LivingEntity entity) {
+    private CombatMath.Rotation rotation(MinecraftClient client, String aimPoint, LivingEntity entity) {
         Box box = entity.getBoundingBox();
         Vec3d eye = client.player.getEyePos();
         Vec3d aim;
-        if ("NEAREST".equals(config.aimPoint)) {
+        if ("NEAREST".equals(aimPoint)) {
             double inset = Math.min(0.03, Math.min(box.getLengthX(), box.getLengthZ()) * 0.1);
             aim = new Vec3d(CombatMath.clamp(eye.x, box.minX + inset, box.maxX - inset),
                     CombatMath.clamp(eye.y, box.minY + inset, box.maxY - inset),
                     CombatMath.clamp(eye.z, box.minZ + inset, box.maxZ - inset));
         } else {
-            double fraction = "HEAD".equals(config.aimPoint) ? 0.9 : 0.65;
+            double fraction = "HEAD".equals(aimPoint) ? 0.9 : 0.65;
             aim = new Vec3d((box.minX + box.maxX) / 2.0,
                     box.minY + (box.maxY - box.minY) * fraction, (box.minZ + box.maxZ) / 2.0);
         }
@@ -192,18 +267,52 @@ public final class CombatController {
         return CombatMath.lookAt(difference.x, difference.y, difference.z);
     }
 
-    private void rotate(MinecraftClient client, ClientConfig config, LivingEntity entity, boolean smooth) {
-        CombatMath.Rotation rotation = rotation(client, config, entity);
-        if (smooth) {
-            client.player.setYaw(CombatMath.smoothYaw(client.player.getYaw(), rotation.yaw(),
-                    config.aimSpeed, config.aimSmoothing));
-            client.player.setPitch(CombatMath.smoothPitch(client.player.getPitch(), rotation.pitch(),
-                    config.aimPitchSpeed, config.aimSmoothing));
-        } else {
-            client.player.setYaw(CombatMath.turnToward(client.player.getYaw(), rotation.yaw(), 180));
-            client.player.setPitch(rotation.pitch());
+    private void rotateAim(MinecraftClient client, ClientConfig config, LivingEntity entity) {
+        CombatMath.Rotation desired = rotation(client, config.aimPoint, entity);
+        apply(client, aimStepper.step(client.player.getYaw(), client.player.getPitch(), desired.yaw(), desired.pitch(),
+                config.aimSpeed, config.aimPitchSpeed, config.aimSmoothing, config.aimAcceleration, config.aimDeadzone));
+    }
+
+    private void rotateAura(MinecraftClient client, ClientConfig config, LivingEntity entity) {
+        boolean smooth = "SMOOTH".equals(config.auraRotation);
+        if (!smooth && !burstActive) {
+            burstActive = true;
+            if (config.auraReturnView && !savedView) {
+                savedView = true;
+                viewYaw = client.player.getYaw(); viewPitch = client.player.getPitch();
+            }
         }
-        client.player.setHeadYaw(client.player.getYaw());
+        CombatMath.Rotation desired = rotation(client, config.auraAimPoint, entity);
+        CombatMath.Rotation next = "SNAP".equals(config.auraRotation) ? desired : auraStepper.step(
+                client.player.getYaw(), client.player.getPitch(), desired.yaw(), desired.pitch(),
+                config.auraYawSpeed, config.auraPitchSpeed, config.auraSmoothing, config.auraAcceleration, config.auraDeadzone);
+        apply(client, next);
+        lastAppliedYaw = client.player.getYaw(); lastAppliedPitch = client.player.getPitch();
+    }
+
+    private void returnView(MinecraftClient client, ClientConfig config) {
+        CombatMath.Rotation next = "SNAP".equals(config.auraRotation) ? new CombatMath.Rotation(viewYaw, viewPitch)
+                : returnStepper.step(client.player.getYaw(), client.player.getPitch(), viewYaw, viewPitch,
+                    config.auraYawSpeed, config.auraPitchSpeed, config.auraSmoothing, config.auraAcceleration, config.auraDeadzone);
+        apply(client, next);
+        lastAppliedYaw = next.yaw(); lastAppliedPitch = next.pitch();
+        if (Math.abs(CombatMath.wrapDegrees(viewYaw - next.yaw())) <= config.auraDeadzone + .01
+                && Math.abs(viewPitch - next.pitch()) <= config.auraDeadzone + .01) {
+            savedView = false; returningView = false; burstActive = false;
+            auraStepper.reset(); returnStepper.reset();
+        }
+    }
+
+    private void clearAuraMotion() {
+        auraTarget = null;
+        burstActive = false; savedView = false; returningView = false;
+        auraStepper.reset(); returnStepper.reset();
+    }
+
+    private void apply(MinecraftClient client, CombatMath.Rotation rotation) {
+        client.player.setYaw(rotation.yaw());
+        client.player.setPitch(rotation.pitch());
+        client.player.setHeadYaw(rotation.yaw());
     }
 
     /** Recheck the post-rotation ray and blocks; stale crosshair data must not cause an attack. */

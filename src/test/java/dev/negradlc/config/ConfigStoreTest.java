@@ -71,4 +71,49 @@ class ConfigStoreTest {
         assertEquals(-1, config.binds.get("killAura"));
         assertEquals(-1, config.binds.get("airStag"));
     }
+
+    @Test void versionTwoSettingsKeepCritPolicyAndTriggerBindWhenNewModesAreAdded() throws Exception {
+        Path file = directory.resolve("client.json");
+        Files.writeString(file, """
+            {"critOnly":true,"autoCritJump":false,"triggerBot":true,
+             "attackCooldown":0.97,"binds":{"triggerBot":290},"aimPoint":"HEAD"}
+            """);
+        var store = new ConfigStore(file);
+        var config = store.load();
+        assertTrue(config.critOnly);
+        assertFalse(config.autoCritJump);
+        assertTrue(config.triggerBot);
+        assertEquals(0.97, config.attackCooldown);
+        assertEquals(290, config.binds.get("triggerBot"));
+        assertFalse(config.smoothTriggerAim);
+        assertEquals("SNAP_LEGIT", config.auraRotation);
+        config.auraRotation = "SMOOTH";
+        config.auraYawSpeed = 12;
+        store.save(config);
+        var loaded = store.load();
+        assertEquals("SMOOTH", loaded.auraRotation);
+        assertEquals(12, loaded.auraYawSpeed);
+        assertTrue(loaded.critOnly);
+        assertFalse(loaded.autoCritJump);
+        assertEquals(290, loaded.binds.get("triggerBot"));
+        assertEquals("HEAD", loaded.aimPoint);
+    }
+
+    @Test void invalidNewModesFallBackWithoutChangingExistingCombatSettings() throws Exception {
+        Path file = directory.resolve("client.json");
+        Files.writeString(file, """
+            {"auraRotation":"bad","auraAimPoint":null,"auraPriority":"bad",
+             "auraYawSpeed":-1,"auraSmoothing":5,"aimAcceleration":-2,
+             "critOnly":true,"autoCritJump":true}
+            """);
+        var config = new ConfigStore(file).load();
+        assertEquals("SNAP_LEGIT", config.auraRotation);
+        assertEquals("CHEST", config.auraAimPoint);
+        assertEquals("DISTANCE", config.auraPriority);
+        assertEquals(1, config.auraYawSpeed);
+        assertEquals(1, config.auraSmoothing);
+        assertEquals(0.1, config.aimAcceleration);
+        assertTrue(config.critOnly);
+        assertTrue(config.autoCritJump);
+    }
 }

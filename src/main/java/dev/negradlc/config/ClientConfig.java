@@ -16,7 +16,14 @@ public final class ClientConfig {
     public double attackCooldown = 0.92;
     public double aimPitchSpeed = 4, aimSmoothing = 0.35, auraFov = 180;
     public String aimPoint = "CHEST";
-    public boolean aimVisibleOnly = true;
+    public boolean aimVisibleOnly = true, aimLockTarget = true;
+    public String auraRotation = "SNAP_LEGIT", auraAimPoint = "CHEST", auraPriority = "DISTANCE";
+    public double auraYawSpeed = 35, auraPitchSpeed = 20, auraSmoothing = 0.45;
+    public double auraAcceleration = 8, auraDeadzone = 0.15;
+    public boolean auraReturnView = true, auraLockTarget = true;
+    public double aimAcceleration = 2, aimDeadzone = 0.15;
+    public boolean smoothTriggerAim;
+    public double triggerAimFov = 30;
     public boolean esp, tracers;
     public boolean espPlayers = true, espHostile, espPassive, espThroughWalls = true;
     public boolean espHealth = true, espNames = true;
@@ -93,6 +100,17 @@ public final class ClientConfig {
         aimSmoothing = clamp(aimSmoothing, 0.05, 1, 0.35);
         auraFov = clamp(auraFov, 10, 360, 180);
         if (!Set.of("CHEST", "HEAD", "NEAREST").contains(aimPoint == null ? "" : aimPoint)) aimPoint = "CHEST";
+        auraRotation = choice(auraRotation, "SNAP_LEGIT", "SNAP", "SMOOTH");
+        auraAimPoint = choice(auraAimPoint, "CHEST", "HEAD", "NEAREST");
+        auraPriority = choice(auraPriority, "DISTANCE", "CROSSHAIR", "HEALTH");
+        auraYawSpeed = clamp(auraYawSpeed, 1, 180, 35);
+        auraPitchSpeed = clamp(auraPitchSpeed, 1, 90, 20);
+        auraSmoothing = clamp(auraSmoothing, 0.05, 1, 0.45);
+        auraAcceleration = clamp(auraAcceleration, 0.25, 40, 8);
+        auraDeadzone = clamp(auraDeadzone, 0, 2, 0.15);
+        aimAcceleration = clamp(aimAcceleration, 0.1, 20, 2);
+        aimDeadzone = clamp(aimDeadzone, 0, 2, 0.15);
+        triggerAimFov = clamp(triggerAimFov, 5, 90, 30);
         espRange = clamp(espRange, 8, 192, 64);
         tracerRange = clamp(tracerRange, 8, 192, 64);
         espLineWidth = clamp(espLineWidth, 1, 4, 1.5);
@@ -128,5 +146,11 @@ public final class ClientConfig {
 
     private static double clamp(double value, double min, double max, double fallback) {
         return Double.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+    }
+
+    private static String choice(String value, String fallback, String... alternatives) {
+        if (fallback.equals(value)) return value;
+        for (String alternative : alternatives) if (alternative.equals(value)) return value;
+        return fallback;
     }
 }
