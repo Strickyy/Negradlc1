@@ -1,6 +1,7 @@
 package dev.negradlc.ui;
 
 import dev.negradlc.config.ClientConfig;
+import dev.negradlc.visuals.EspRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.LivingEntity;
@@ -12,18 +13,27 @@ import java.util.List;
 
 /** HUD widgets are drawn in logical pixels so their placement and scale are independent. */
 public final class HudRenderer {
-    static final int BACKGROUND = 0xEB14141F;
-    static final int BORDER = 0xFF343245;
-    static final int ACCENT = 0xFFA58AFF;
-    static final int WHITE = 0xFFF2F0FF;
-    static final int MUTED = 0xFFAAA5BD;
+    static final int BACKGROUND = 0xD20C1513;
+    static final int BORDER = 0xFF26463D;
+    static final int ACCENT = 0xFF57D9C0;
+    static final int WHITE = 0xFFE6F4EE;
+    static final int MUTED = 0xFF91AAA0;
+    private static String combatStatus = "No target";
 
     private HudRenderer() {}
 
     public static void render(DrawContext draw, MinecraftClient client, ClientConfig config, LivingEntity target) {
+        render(draw, client, config, target, target == null ? "No target" : "Ready");
+    }
+
+    public static void render(DrawContext draw, MinecraftClient client, ClientConfig config,
+                              LivingEntity target, String status) {
+        EspRenderer.renderHud(draw, client, config);
+        combatStatus = status == null ? "" : status;
         if (!config.hud || client.player == null || client.options.hudHidden) return;
         for (int widget = 0; widget < 3; widget++) {
-            if (!enabled(config, widget) || (widget == 2 && target == null)) continue;
+            if (!enabled(config, widget) || (widget == 2 && target == null
+                    && !config.killAura && !config.triggerBot && !config.aimAssist)) continue;
             double scale = MathHelper.clamp(scale(config, widget), 0.6, 2.0);
             int maxX = Math.max(0, client.getWindow().getScaledWidth() - (int) (width(widget) * scale));
             int maxY = Math.max(0, client.getWindow().getScaledHeight() - (int) (height(client, config, widget) * scale));
@@ -45,7 +55,7 @@ public final class HudRenderer {
             case 0 -> {
                 draw.fill(10, 12, 13, 30, ACCENT);
                 draw.drawTextWithShadow(client.textRenderer, "NEGRADLC", 20, 10, WHITE);
-                draw.drawText(client.textRenderer, "1.21.4  /  FABRIC", 20, 25, MUTED, false);
+                draw.drawText(client.textRenderer, "FABRIC  /  " + client.getCurrentFps() + " FPS", 20, 25, MUTED, false);
                 draw.fill(width - 13, 12, width - 9, 16, 0xFF8CE4B1);
             }
             case 1 -> {
@@ -65,20 +75,22 @@ public final class HudRenderer {
                 }
             }
             case 2 -> {
-                String name = target == null ? "Target preview" : target.getName().getString();
-                float health = target == null ? 17 : Math.max(0, target.getHealth());
+                String name = target == null ? preview ? "Target preview" : "Combat status" : target.getName().getString();
+                float health = target == null ? preview ? 17 : 0 : Math.max(0, target.getHealth());
                 float maxHealth = target == null ? 20 : Math.max(1, target.getMaxHealth());
-                draw.fill(10, 12, 39, 41, 0xFF302A45);
+                draw.fill(10, 12, 39, 41, 0xFF183D32);
                 String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
                 draw.drawCenteredTextWithShadow(client.textRenderer, initial, 25, 22, ACCENT);
                 draw.drawTextWithShadow(client.textRenderer, clipped(client, name, width - 60), 49, 11, WHITE);
                 String hp = String.format(java.util.Locale.ROOT, "%.1f / %.1f HP", health, maxHealth);
                 draw.drawText(client.textRenderer, hp, 49, 25, MUTED, false);
-                draw.fill(49, 40, width - 10, 44, 0xFF373044);
+                draw.fill(49, 40, width - 10, 44, 0xFF263C33);
                 draw.fill(49, 40, 49 + (int) ((width - 59) * MathHelper.clamp(health / maxHealth, 0, 1)), 44, ACCENT);
                 String detail = preview ? "Drag to place  /  corner to resize" : target == null ? "" :
                         client.player == null ? "" : String.format(java.util.Locale.ROOT, "Distance  %.1fm", client.player.distanceTo(target));
                 draw.drawText(client.textRenderer, detail, 10, 52, MUTED, false);
+                if (!preview) draw.drawText(client.textRenderer,
+                        clipped(client, combatStatus, width - 20), 10, 65, ACCENT, false);
             }
             default -> { }
         }
@@ -108,6 +120,8 @@ public final class HudRenderer {
         if (config.airStrafe) modules.add("Air Strafe");
         if (config.airStag) modules.add("AirStag");
         if (config.fullbright) modules.add("Fullbright");
+        if (config.esp) modules.add("ESP");
+        if (config.tracers) modules.add("Tracers");
         modules.sort(Comparator.comparingInt((String name) -> client.textRenderer.getWidth(name)).reversed());
         return modules;
     }
@@ -117,7 +131,7 @@ public final class HudRenderer {
         return switch (widget) {
             case 0 -> 43;
             case 1 -> 38 + Math.max(1, modules(client, config).size()) * 16;
-            default -> 68;
+            default -> 82;
         };
     }
     static String name(int widget) {

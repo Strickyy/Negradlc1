@@ -2,25 +2,38 @@ package dev.negradlc.combat;
 
 import dev.negradlc.config.ClientConfig;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.SpawnGroup;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
 import java.util.Optional;
 
 /** Runs on the client tick thread. Rotation uses the real camera, with no spoofed packets. */
 public final class CombatController {
+    private static final Logger LOG = LoggerFactory.getLogger("Negradlc/Combat");
+    private static final boolean DEBUG = Boolean.getBoolean("negradlc.debugCombat");
     private LivingEntity target;
+    private String status = "Disabled";
+    private int sprintStoppedAt = -1;
+    private final FallTracker fallTracker = new FallTracker();
+    private ClientPlayerEntity trackedPlayer;
+    private Object trackedWorld;
+
+    public String getStatus() { return status; }
 
     public LivingEntity getTarget() {
         return target;
@@ -28,64 +41,128 @@ public final class CombatController {
 
     public void reset() {
         target = null;
+        status = "Disabled";
+        sprintStoppedAt = -1;
+        fallTracker.reset();
+        trackedPlayer = null;
+        trackedWorld = null;
     }
 
     public void tick(MinecraftClient client, ClientConfig config) {
-        reset();
+        target = null;
+        status = "No target";
         if (client.player == null || client.world == null || client.interactionManager == null
                 || client.currentScreen != null || !client.isWindowFocused()
                 || !client.player.isAlive() || client.player.isSpectator()
                 || client.player.isUsingItem()) {
+            status = "Paused";
+            sprintStoppedAt = -1;
+            fallTracker.reset();
             return;
         }
-        if (!config.killAura && !config.triggerBot && !config.aimAssist) return;
+        if (!config.killAura && !config.triggerBot && !config.aimAssist) { reset(); return; }
+        if (trackedPlayer != client.player || trackedWorld != client.world) {
+            fallTracker.reset();
+            trackedPlayer = client.player;
+            trackedWorld = client.world;
+        }
+        // In 1.21.4 Entity.move skips fall() for player-controlled entities.
+        // Observe real descent instead of requiring the often-zero client fallDistance.
+        float observedFall = fallTracker.sample(client.player.getY(), client.player.isOnGround());
 
         double attackRange = Math.max(0.0, config.attackRange);
         if (config.killAura) {
-            target = closest(client, config, attackRange, false);
+            target = closest(client, config, attackRange, config.auraFov, true);
         } else if (config.triggerBot && client.crosshairTarget instanceof EntityHitResult hit
                 && hit.getEntity() instanceof LivingEntity living
-                && eligible(client, config, living, attackRange)) {
+                && eligible(client, config, living, attackRange, true)) {
             target = living;
         }
 
         LivingEntity attackTarget = target;
         if (config.killAura && target != null) {
             // AimAssist provides the turn-speed setting; otherwise Aura turns directly.
-            rotate(client, target, config.aimAssist ? config.aimSpeed : 180.0);
+            rotate(client, config, target, config.aimAssist);
         } else if (config.aimAssist && (!config.requireAttackKey || client.options.attackKey.isPressed())) {
-            LivingEntity aimTarget = closest(client, config, Math.max(0.0, config.aimRange), true);
+            LivingEntity aimTarget = closest(client, config, Math.max(0.0, config.aimRange), config.aimFov, config.aimVisibleOnly);
             if (aimTarget != null) {
-                rotate(client, aimTarget, config.aimSpeed);
+                rotate(client, config, aimTarget, true);
+                status = "Aiming";
                 target = aimTarget;
             }
         }
 
-        if (attackTarget == null || (!config.killAura && !config.triggerBot)) return;
-        if (client.player.getAttackCooldownProgress(0.0f) < Math.max(0.0, Math.min(1.0, config.attackCooldown))) return;
-        if (config.critOnly && !CombatMath.canCriticalHit(client.player.fallDistance,
-                client.player.isOnGround(), client.player.isClimbing(), client.player.isTouchingWater(),
-                client.player.hasStatusEffect(StatusEffects.BLINDNESS), client.player.hasVehicle(),
-                client.player.isSprinting())) return;
-        if (!looksAt(client, attackTarget, attackRange)) return;
-
+        if (attackTarget == null || (!config.killAura && !config.triggerBot)) {
+            sprintStoppedAt = -1;
+            return;
+        }
+        if (!looksAt(client, attackTarget, attackRange)) {
+            status = "Aligning / blocked";
+            return;
+        }
+        if (client.player.getAttackCooldownProgress(0.0f) < config.attackCooldown) {
+            status = "Recharging";
+            return;
+        }
+        if (config.critOnly) {
+            if (config.airStag || client.player.getAbilities().flying || client.player.hasNoGravity()) {
+                status = "Crit: disable hover / flight";
+                return;
+            }
+            if (client.player.isClimbing() || client.player.isTouchingWater() || client.player.isInLava()
+                    || client.player.hasStatusEffect(StatusEffects.BLINDNESS) || client.player.hasVehicle()) {
+                status = "Crit unavailable here";
+                return;
+            }
+            // A held sprint key can restart sprint before vanilla notices our end-tick
+            // change. Transmit the same real transition explicitly, keeping client and
+            // server in the stopped state before the attack packet is sent.
+            if (client.player.isSprinting()) {
+                if (sprintStoppedAt < 0) sprintStoppedAt = client.player.age;
+                client.player.setSprinting(false);
+                client.player.networkHandler.sendPacket(new ClientCommandC2SPacket(
+                        client.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
+            }
+            if (sprintStoppedAt == client.player.age) {
+                status = "Stopping sprint";
+                return;
+            }
+            if (client.player.isOnGround() && config.autoCritJump) {
+                client.player.jump();
+                status = "Jumping for critical";
+                return;
+            }
+            if (DEBUG) LOG.info("crit tick={} y={} vy={} ground={} vanillaFall={} observedFall={} sprint={}",
+                    client.player.age, client.player.getY(), client.player.getVelocity().y,
+                    client.player.isOnGround(), client.player.fallDistance, observedFall, client.player.isSprinting());
+            if (!CombatMath.canCriticalHit(Math.max(client.player.fallDistance, observedFall),
+                    client.player.isOnGround(), client.player.isClimbing(), client.player.isTouchingWater(),
+                    client.player.hasStatusEffect(StatusEffects.BLINDNESS), client.player.hasVehicle(),
+                    client.player.isSprinting()) || client.player.getVelocity().y >= 0) {
+                status = "Waiting for falling critical";
+                return;
+            }
+        } else {
+            sprintStoppedAt = -1;
+        }
         client.interactionManager.attackEntity(client.player, attackTarget);
         client.player.swingHand(Hand.MAIN_HAND);
+        status = config.critOnly ? "Critical attack" : "Attack";
     }
 
-    private LivingEntity closest(MinecraftClient client, ClientConfig config, double range, boolean useFov) {
+    private LivingEntity closest(MinecraftClient client, ClientConfig config, double range, double fov, boolean requireVisibility) {
         return client.world.getEntitiesByClass(LivingEntity.class,
                         client.player.getBoundingBox().expand(range + 1.0),
-                        entity -> eligible(client, config, entity, range)
-                                && (!useFov || CombatMath.insideFov(client.player.getYaw(),
-                                rotation(client, entity).yaw(), config.aimFov)))
+                        entity -> eligible(client, config, entity, range, requireVisibility)
+                                && CombatMath.insideFov(client.player.getYaw(),
+                                rotation(client, config, entity).yaw(), fov))
                 .stream().min(Comparator.comparingDouble(entity -> distanceSquared(client.player.getEyePos(),
                         entity.getBoundingBox()))).orElse(null);
     }
 
-    private boolean eligible(MinecraftClient client, ClientConfig config, LivingEntity entity, double range) {
+    private boolean eligible(MinecraftClient client, ClientConfig config, LivingEntity entity, double range, boolean requireVisibility) {
         if (entity == client.player || !entity.isAlive() || entity.isRemoved()
-                || !entity.isAttackable() || !client.player.canSee(entity)
+                || !entity.isAttackable() || requireVisibility && !client.player.canSee(entity)
                 || distanceSquared(client.player.getEyePos(), entity.getBoundingBox()) > range * range) return false;
         if (entity instanceof PlayerEntity player) {
             if (!config.targetPlayers || player.isSpectator() || player.isCreative()) return false;
@@ -97,21 +174,35 @@ public final class CombatController {
                 ? config.targetHostile : config.targetPassive;
     }
 
-    private CombatMath.Rotation rotation(MinecraftClient client, LivingEntity entity) {
+    private CombatMath.Rotation rotation(MinecraftClient client, ClientConfig config, LivingEntity entity) {
         Box box = entity.getBoundingBox();
-        Vec3d aim = new Vec3d((box.minX + box.maxX) / 2.0,
-                box.minY + (box.maxY - box.minY) * 0.65, (box.minZ + box.maxZ) / 2.0);
-        Vec3d difference = aim.subtract(client.player.getEyePos());
+        Vec3d eye = client.player.getEyePos();
+        Vec3d aim;
+        if ("NEAREST".equals(config.aimPoint)) {
+            double inset = Math.min(0.03, Math.min(box.getLengthX(), box.getLengthZ()) * 0.1);
+            aim = new Vec3d(CombatMath.clamp(eye.x, box.minX + inset, box.maxX - inset),
+                    CombatMath.clamp(eye.y, box.minY + inset, box.maxY - inset),
+                    CombatMath.clamp(eye.z, box.minZ + inset, box.maxZ - inset));
+        } else {
+            double fraction = "HEAD".equals(config.aimPoint) ? 0.9 : 0.65;
+            aim = new Vec3d((box.minX + box.maxX) / 2.0,
+                    box.minY + (box.maxY - box.minY) * fraction, (box.minZ + box.maxZ) / 2.0);
+        }
+        Vec3d difference = aim.subtract(eye);
         return CombatMath.lookAt(difference.x, difference.y, difference.z);
     }
 
-    private void rotate(MinecraftClient client, LivingEntity entity, double speed) {
-        CombatMath.Rotation rotation = rotation(client, entity);
-        client.player.setYaw(CombatMath.turnToward(client.player.getYaw(), rotation.yaw(), speed));
-        float pitchDifference = rotation.pitch() - client.player.getPitch();
-        float step = (float) Math.max(0.0, Math.min(180.0, speed));
-        client.player.setPitch(CombatMath.clampPitch(client.player.getPitch()
-                + Math.max(-step, Math.min(step, pitchDifference))));
+    private void rotate(MinecraftClient client, ClientConfig config, LivingEntity entity, boolean smooth) {
+        CombatMath.Rotation rotation = rotation(client, config, entity);
+        if (smooth) {
+            client.player.setYaw(CombatMath.smoothYaw(client.player.getYaw(), rotation.yaw(),
+                    config.aimSpeed, config.aimSmoothing));
+            client.player.setPitch(CombatMath.smoothPitch(client.player.getPitch(), rotation.pitch(),
+                    config.aimPitchSpeed, config.aimSmoothing));
+        } else {
+            client.player.setYaw(CombatMath.turnToward(client.player.getYaw(), rotation.yaw(), 180));
+            client.player.setPitch(rotation.pitch());
+        }
         client.player.setHeadYaw(client.player.getYaw());
     }
 

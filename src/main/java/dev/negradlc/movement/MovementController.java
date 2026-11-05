@@ -29,7 +29,8 @@ public final class MovementController {
         boolean left = client.options.leftKey.isPressed();
         boolean right = client.options.rightKey.isPressed();
         boolean sneaking = client.options.sneakKey.isPressed();
-        boolean canSprint = config.sprint && forward && !backward && !sneaking
+        boolean canSprint = config.sprint && !(config.critOnly && (config.killAura || config.triggerBot))
+                && forward && !backward && !sneaking
                 && !player.horizontalCollision && !player.isUsingItem()
                 && (player.getHungerManager().getFoodLevel() > 6 || player.getAbilities().allowFlying);
         if (canSprint) {

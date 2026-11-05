@@ -29,6 +29,29 @@ public final class CombatMath {
         return Math.max(-90.0f, Math.min(90.0f, pitch));
     }
 
+    public static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    /** Exponential ease near the target, with a hard per-tick speed ceiling. */
+    public static float smoothYaw(float current, float target, double maximumStep, double smoothing) {
+        float difference = wrapDegrees(target - current);
+        return current + easedStep(difference, maximumStep, smoothing);
+    }
+
+    public static float smoothPitch(float current, float target, double maximumStep, double smoothing) {
+        return clampPitch(current + easedStep(clampPitch(target) - current, maximumStep, smoothing));
+    }
+
+    private static float easedStep(float difference, double maximumStep, double smoothing) {
+        double fraction = clamp(smoothing, 0.05, 1);
+        double step = difference * fraction;
+        // Snap the last tiny fraction to avoid endless sub-pixel jitter.
+        if (Math.abs(difference) < 0.05) step = difference;
+        double limit = clamp(maximumStep, 0, 180);
+        return (float) clamp(step, -limit, limit);
+    }
+
     /** FOV is the full horizontal cone, centered on the current camera direction. */
     public static boolean insideFov(float cameraYaw, float targetYaw, double fullFov) {
         return Math.abs(wrapDegrees(targetYaw - cameraYaw)) <= Math.max(0.0, Math.min(360.0, fullFov)) / 2.0;

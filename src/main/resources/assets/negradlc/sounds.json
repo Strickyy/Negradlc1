@@ -1,0 +1,5 @@
+{
+  "toggle_on": {"sounds": [{"name": "negradlc:toggle_on", "stream": false}]},
+  "toggle_off": {"sounds": [{"name": "negradlc:toggle_off", "stream": false}]},
+  "click": {"sounds": [{"name": "negradlc:click", "stream": false}]}
+}

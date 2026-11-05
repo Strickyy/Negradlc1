@@ -16,7 +16,11 @@ sourceSets {
             srcDirs = ['../src/main/java']
             include 'dev/negradlc/config/**'
             include 'dev/negradlc/combat/CombatMath.java'
+            include 'dev/negradlc/combat/FallTracker.java'
             include 'dev/negradlc/movement/MovementMath.java'
+            include 'dev/negradlc/input/BindingCodes.java'
+            include 'dev/negradlc/input/WheelAccumulator.java'
+            include 'dev/negradlc/visuals/ScreenProjection.java'
         }
     }
     test { java.srcDirs = ['../src/test/java'] }

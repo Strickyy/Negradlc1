@@ -38,4 +38,32 @@ class CombatMathTest {
         assertFalse(CombatMath.canCriticalHit(0.2f, false, false, false, false, true, false));
         assertFalse(CombatMath.canCriticalHit(0.2f, false, false, false, false, false, true));
     }
+
+    @Test
+    void smoothAimUsesShortestArcAndHonorsIndependentSpeedCeilings() {
+        assertEquals(180, CombatMath.smoothYaw(179, -179, 10, 0.5), 0.0001);
+        assertEquals(6, CombatMath.smoothYaw(0, 90, 6, 0.5), 0.0001);
+        assertEquals(2, CombatMath.smoothPitch(0, 60, 2, 0.5), 0.0001);
+        assertEquals(-2, CombatMath.smoothPitch(0, -60, 2, 0.5), 0.0001);
+    }
+
+    @Test
+    void smoothAimConvergesWithoutOvershootAndSnapsTinyResiduals() {
+        float yaw = 0;
+        for (int i = 0; i < 100; i++) {
+            float next = CombatMath.smoothYaw(yaw, 42, 6, 0.35);
+            assertTrue(next >= yaw && next <= 42);
+            yaw = next;
+        }
+        assertEquals(42, yaw, 0.0001);
+        assertEquals(20.01, CombatMath.smoothYaw(20, 20.01f, 6, 0.35), 0.0001);
+    }
+
+    @Test
+    void pitchNeverLeavesVanillaLimitsAndZeroSpeedDoesNotMove() {
+        assertEquals(90, CombatMath.smoothPitch(85, 120, 20, 1), 0.0001);
+        assertEquals(-90, CombatMath.smoothPitch(-85, -120, 20, 1), 0.0001);
+        assertEquals(20, CombatMath.smoothYaw(20, 90, 0, 1), 0.0001);
+        assertEquals(20, CombatMath.smoothPitch(20, 90, 0, 1), 0.0001);
+    }
 }

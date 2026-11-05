@@ -4,15 +4,29 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import dev.negradlc.input.BindingCodes;
 
 /** All gameplay modules are opt-in. Saved per game directory. */
 public final class ClientConfig {
     public boolean killAura, triggerBot, aimAssist;
-    public boolean critOnly = true, targetPlayers = true, targetHostile, targetPassive;
+    public boolean critOnly, autoCritJump = true, targetPlayers = true, targetHostile, targetPassive;
     public boolean ignoreFriends = true, requireAttackKey = true;
     public Set<String> friends = new LinkedHashSet<>();
     public double attackRange = 3.0, aimRange = 4.5, aimFov = 90, aimSpeed = 6;
     public double attackCooldown = 0.92;
+    public double aimPitchSpeed = 4, aimSmoothing = 0.35, auraFov = 180;
+    public String aimPoint = "CHEST";
+    public boolean aimVisibleOnly = true;
+    public boolean esp, tracers;
+    public boolean espPlayers = true, espHostile, espPassive, espThroughWalls = true;
+    public boolean espHealth = true, espNames = true;
+    public double espRange = 64, espLineWidth = 1.5;
+    public int espColor = 0x57D9C0;
+    public boolean tracerPlayers = true, tracerMobs, tracerThroughWalls = true;
+    public double tracerRange = 64, tracerWidth = 1.5;
+    public int tracerColor = 0x57D9C0;
+    public boolean toggleSounds = true;
+    public double toggleVolume = 0.35;
     public boolean sprint, airStrafe, airStag, fullbright;
     public double airControl = 0.08;
     public boolean hud = true, watermark = true, moduleList = true, targetHud = true;
@@ -27,7 +41,7 @@ public final class ClientConfig {
     }
 
     public static final String[] MODULES = {
-        "killAura", "triggerBot", "aimAssist", "sprint", "airStag", "airStrafe", "fullbright", "hud"
+        "killAura", "triggerBot", "aimAssist", "sprint", "airStag", "airStrafe", "esp", "tracers", "fullbright", "hud", "toggleSounds"
     };
 
     public static final class HudLayout {
@@ -45,6 +59,9 @@ public final class ClientConfig {
             case "airStrafe" -> airStrafe;
             case "fullbright" -> fullbright;
             case "hud" -> hud;
+            case "esp" -> esp;
+            case "tracers" -> tracers;
+            case "toggleSounds" -> toggleSounds;
             default -> false;
         };
     }
@@ -59,6 +76,9 @@ public final class ClientConfig {
             case "airStrafe" -> airStrafe = !airStrafe;
             case "fullbright" -> fullbright = !fullbright;
             case "hud" -> hud = !hud;
+            case "esp" -> esp = !esp;
+            case "tracers" -> tracers = !tracers;
+            case "toggleSounds" -> toggleSounds = !toggleSounds;
             default -> throw new IllegalArgumentException("Unknown module: " + module);
         }
     }
@@ -69,6 +89,17 @@ public final class ClientConfig {
         aimFov = clamp(aimFov, 5, 180, 90);
         aimSpeed = clamp(aimSpeed, 0.1, 30, 6);
         attackCooldown = clamp(attackCooldown, 0.1, 1, 0.92);
+        aimPitchSpeed = clamp(aimPitchSpeed, 0.1, 30, 4);
+        aimSmoothing = clamp(aimSmoothing, 0.05, 1, 0.35);
+        auraFov = clamp(auraFov, 10, 360, 180);
+        if (!Set.of("CHEST", "HEAD", "NEAREST").contains(aimPoint == null ? "" : aimPoint)) aimPoint = "CHEST";
+        espRange = clamp(espRange, 8, 192, 64);
+        tracerRange = clamp(tracerRange, 8, 192, 64);
+        espLineWidth = clamp(espLineWidth, 1, 4, 1.5);
+        tracerWidth = clamp(tracerWidth, 1, 4, 1.5);
+        espColor &= 0xFFFFFF;
+        tracerColor &= 0xFFFFFF;
+        toggleVolume = clamp(toggleVolume, 0, 1, 0.35);
         airControl = clamp(airControl, 0.01, 0.3, 0.08);
         guiScale = clamp(guiScale, 0.7, 1.5, 1);
         guiWidth = clamp(guiWidth, 220, 1200, 540);
@@ -83,7 +114,7 @@ public final class ClientConfig {
         if (binds == null) binds = new LinkedHashMap<>();
         for (String module : MODULES) {
             Integer key = binds.get(module);
-            if (key == null || key < -1 || key > 348) binds.put(module, -1);
+            if (key == null || !BindingCodes.isValid(key) || key == 344) binds.put(module, -1);
         }
     }
 

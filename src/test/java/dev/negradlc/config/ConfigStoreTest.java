@@ -17,7 +17,8 @@ class ConfigStoreTest {
         assertFalse(config.triggerBot);
         assertFalse(config.aimAssist);
         assertFalse(config.airStag);
-        assertTrue(config.critOnly);
+        assertFalse(config.critOnly);
+        assertTrue(config.autoCritJump);
         assertTrue(config.targetPlayers);
         assertFalse(config.targetHostile);
         assertFalse(config.targetPassive);

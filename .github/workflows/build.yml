@@ -18,5 +18,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: negradlc-1.21.4
-          path: build/libs/negradlc-0.1.0.jar
+          path: build/libs/negradlc-*.jar
           if-no-files-found: error
