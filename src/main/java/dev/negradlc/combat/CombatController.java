@@ -37,8 +37,8 @@ public final class CombatController {
     private final RotationStepper aimStepper = new RotationStepper();
     private final RotationStepper returnStepper = new RotationStepper();
     private String activeMode;
-    private boolean burstActive, savedView, returningView;
-    private float viewYaw, viewPitch, lastAppliedYaw, lastAppliedPitch;
+    private final AuraViewSession viewSession = new AuraViewSession();
+    private final TargetDwell triggerDwell = new TargetDwell();
 
     public String getStatus() { return status; }
 
@@ -56,6 +56,7 @@ public final class CombatController {
         clearAuraMotion();
         aimTarget = null;
         aimStepper.reset();
+        triggerDwell.reset();
     }
 
     public void tick(MinecraftClient client, ClientConfig config) {
@@ -71,9 +72,10 @@ public final class CombatController {
             clearAuraMotion();
             aimTarget = null;
             aimStepper.reset();
+            triggerDwell.reset();
             return;
         }
-        if (!config.killAura && !config.triggerBot && !config.aimAssist) { reset(); return; }
+
         if (trackedPlayer != client.player || trackedWorld != client.world) {
             fallTracker.reset();
             trackedPlayer = client.player;
@@ -81,64 +83,54 @@ public final class CombatController {
             clearAuraMotion();
             aimTarget = null;
             aimStepper.reset();
+            triggerDwell.reset();
         }
         // In 1.21.4 Entity.move skips fall() for player-controlled entities.
         // Observe real descent instead of requiring the often-zero client fallDistance.
         float observedFall = fallTracker.sample(client.player.getY(), client.player.isOnGround());
 
         if (!java.util.Objects.equals(activeMode, config.auraRotation)) {
-            clearAuraMotion();
+            auraStepper.reset();
+            returnStepper.reset();
             activeMode = config.auraRotation;
         }
-        if (savedView) {
-            // Keep mouse input made during a burst instead of returning to a stale view.
-            viewYaw += CombatMath.wrapDegrees(client.player.getYaw() - lastAppliedYaw);
-            viewPitch = CombatMath.clampPitch(viewPitch + client.player.getPitch() - lastAppliedPitch);
-            lastAppliedYaw = client.player.getYaw(); lastAppliedPitch = client.player.getPitch();
-        }
-        if (savedView && !config.auraReturnView) { savedView = false; returningView = false; }
-        if (returningView || !config.killAura && savedView) {
-            returnView(client, config);
-            status = "Returning view";
-            return;
-        }
-        if (!config.killAura) clearAuraMotion();
+        viewSession.observe(client.player.getYaw(), client.player.getPitch());
+        if (!config.auraReturnView) viewSession.reset();
 
         double attackRange = Math.max(0.0, config.attackRange);
+        LivingEntity attackTarget = null;
         if (config.killAura) {
-            LivingEntity next = config.auraLockTarget && auraTarget != null
-                    && eligible(client, config, auraTarget, attackRange, true)
-                    && CombatMath.insideFov(client.player.getYaw(), rotation(client, config.auraAimPoint, auraTarget).yaw(), config.auraFov)
-                    ? auraTarget : closest(client, config, attackRange, config.auraFov, true, true);
-            if (next != auraTarget) {
-                auraStepper.reset();
-                burstActive = false;
-                if (savedView) {
-                    returningView = true;
-                    auraTarget = next;
-                    returnView(client, config);
-                    status = "Returning view";
-                    return;
-                }
-            }
+            LivingEntity candidate = closest(client, config, attackRange, config.auraFov, true, true);
+            LivingEntity next = retainAuraTarget(client, config, candidate, attackRange);
+            if (next != auraTarget) auraStepper.reset();
             target = auraTarget = next;
-        } else if (config.triggerBot && client.crosshairTarget instanceof EntityHitResult hit
+            attackTarget = next;
+        } else {
+            auraTarget = null;
+            auraStepper.reset();
+        }
+        boolean auraActive = config.killAura && auraTarget != null;
+        if (!auraActive && config.triggerBot && client.crosshairTarget instanceof EntityHitResult hit
                 && hit.getEntity() instanceof LivingEntity living
                 && eligible(client, config, living, attackRange, true)) {
-            target = living;
+            attackTarget = target = living;
         }
+        boolean dwellReady = triggerDwell.update(!auraActive && config.triggerBot && attackTarget != null
+                ? attackTarget.getId() : -1, client.player.age, config.triggerDwellTicks);
 
-        LivingEntity attackTarget = target;
-        if (config.killAura && target != null) {
+        boolean aimRequested = config.aimAssist || config.triggerBot && config.smoothTriggerAim;
+        boolean aimAllowed = aimRequested && (!config.requireAttackKey || client.options.attackKey.isPressed());
+        if (auraActive) {
             aimTarget = null;
             aimStepper.reset();
-            boolean smooth = "SMOOTH".equals(config.auraRotation);
-            boolean ready = client.player.getAttackCooldownProgress(0.0f) >= config.attackCooldown;
-            boolean criticalTurnWindow = !config.critOnly || client.player.isOnGround()
-                    || observedFall > 0 && client.player.getVelocity().y < 0;
-            if (smooth || (ready || burstActive) && criticalTurnWindow) rotateAura(client, config, target);
-        } else if (!config.killAura && (config.aimAssist || config.triggerBot && config.smoothTriggerAim)
-                && (!config.requireAttackKey || client.options.attackKey.isPressed())) {
+            // Keep one stable acquisition session across hits and cooldowns. Returning
+            // after each swing was the source of the visible aim/view oscillation.
+            viewSession.acquire(client.player.getYaw(), client.player.getPitch(), config.auraReturnView);
+            rotateAura(client, config, auraTarget);
+        } else if (aimAllowed) {
+            // KillAura enabled with no eligible melee target must not disable Aim Assist.
+            viewSession.reset();
+            returnStepper.reset();
             double fov = config.triggerBot && config.smoothTriggerAim ? Math.min(config.aimFov, config.triggerAimFov) : config.aimFov;
             LivingEntity next = config.aimLockTarget && aimTarget != null
                     && eligible(client, config, aimTarget, config.aimRange, config.aimVisibleOnly)
@@ -150,14 +142,33 @@ public final class CombatController {
                 rotateAim(client, config, next);
                 status = "Aiming";
                 target = next;
+            } else {
+                status = noTargetStatus(config);
             }
         } else {
             aimTarget = null;
             aimStepper.reset();
+            if (aimRequested) status = "Aim: hold attack key";
+            else if (config.killAura || config.triggerBot) status = noTargetStatus(config);
+            else status = "Disabled";
+            // TriggerBot retains camera priority when its crosshair already has a target.
+            if (config.triggerBot && attackTarget != null) viewSession.reset();
+            else {
+                viewSession.release(config.auraReturnView);
+                if (viewSession.returning()) {
+                    returnView(client, config);
+                    status = "Returning view";
+                    return;
+                }
+            }
         }
 
         if (attackTarget == null || (!config.killAura && !config.triggerBot)) {
             sprintStoppedAt = -1;
+            return;
+        }
+        if (!auraActive && config.triggerBot && !dwellReady) {
+            status = "Trigger: stabilizing crosshair";
             return;
         }
         if (!looksAt(client, attackTarget, attackRange)) {
@@ -212,11 +223,6 @@ public final class CombatController {
         client.interactionManager.attackEntity(client.player, attackTarget);
         client.player.swingHand(Hand.MAIN_HAND);
         status = config.critOnly ? "Critical attack" : "Attack";
-        if (config.killAura && !"SMOOTH".equals(config.auraRotation)) {
-            burstActive = false;
-            returningView = savedView;
-            returnStepper.reset();
-        }
     }
 
     private LivingEntity closest(MinecraftClient client, ClientConfig config, double range, double fov, boolean requireVisibility, boolean aura) {
@@ -274,38 +280,76 @@ public final class CombatController {
     }
 
     private void rotateAura(MinecraftClient client, ClientConfig config, LivingEntity entity) {
-        boolean smooth = "SMOOTH".equals(config.auraRotation);
-        if (!smooth && !burstActive) {
-            burstActive = true;
-            if (config.auraReturnView && !savedView) {
-                savedView = true;
-                viewYaw = client.player.getYaw(); viewPitch = client.player.getPitch();
-            }
-        }
         CombatMath.Rotation desired = rotation(client, config.auraAimPoint, entity);
-        CombatMath.Rotation next = "SNAP".equals(config.auraRotation) ? desired : auraStepper.step(
-                client.player.getYaw(), client.player.getPitch(), desired.yaw(), desired.pitch(),
-                config.auraYawSpeed, config.auraPitchSpeed, config.auraSmoothing, config.auraAcceleration, config.auraDeadzone);
+        double yawSpeed = config.auraYawSpeed, pitchSpeed = config.auraPitchSpeed;
+        double smoothing = config.auraSmoothing, acceleration = config.auraAcceleration;
+        if ("SNAP".equals(config.auraRotation)) {
+            // Fast acquisition, not an instantaneous 180-degree teleport. Even Snap
+            // retains finite velocity/acceleration so the screen cannot flicker.
+            yawSpeed = Math.min(60, Math.max(20, yawSpeed));
+            pitchSpeed = Math.min(35, Math.max(12, pitchSpeed));
+            smoothing = Math.max(0.65, smoothing);
+            acceleration = Math.min(20, Math.max(8, acceleration));
+        } else if ("SNAP_LEGIT".equals(config.auraRotation)) {
+            yawSpeed = Math.min(35, yawSpeed);
+            pitchSpeed = Math.min(22, pitchSpeed);
+            acceleration = Math.min(8, acceleration);
+        } else {
+            yawSpeed = Math.min(18, yawSpeed);
+            pitchSpeed = Math.min(12, pitchSpeed);
+            smoothing = Math.min(0.35, smoothing);
+            acceleration = Math.min(4, acceleration);
+        }
+        CombatMath.Rotation next = auraStepper.step(client.player.getYaw(), client.player.getPitch(),
+                desired.yaw(), desired.pitch(), yawSpeed, pitchSpeed, smoothing, acceleration, config.auraDeadzone);
         apply(client, next);
-        lastAppliedYaw = client.player.getYaw(); lastAppliedPitch = client.player.getPitch();
+        viewSession.applied(next.yaw(), next.pitch());
     }
 
     private void returnView(MinecraftClient client, ClientConfig config) {
-        CombatMath.Rotation next = "SNAP".equals(config.auraRotation) ? new CombatMath.Rotation(viewYaw, viewPitch)
-                : returnStepper.step(client.player.getYaw(), client.player.getPitch(), viewYaw, viewPitch,
-                    config.auraYawSpeed, config.auraPitchSpeed, config.auraSmoothing, config.auraAcceleration, config.auraDeadzone);
+        // Always ease the one return after loss/disable; never snap the view backwards.
+        CombatMath.Rotation next = returnStepper.step(client.player.getYaw(), client.player.getPitch(),
+                viewSession.yaw(), viewSession.pitch(), Math.min(12, config.auraYawSpeed),
+                Math.min(8, config.auraPitchSpeed), Math.min(0.25, config.auraSmoothing),
+                Math.min(3, config.auraAcceleration), config.auraDeadzone);
         apply(client, next);
-        lastAppliedYaw = next.yaw(); lastAppliedPitch = next.pitch();
-        if (Math.abs(CombatMath.wrapDegrees(viewYaw - next.yaw())) <= config.auraDeadzone + .01
-                && Math.abs(viewPitch - next.pitch()) <= config.auraDeadzone + .01) {
-            savedView = false; returningView = false; burstActive = false;
+        viewSession.applied(next.yaw(), next.pitch());
+        if (Math.abs(CombatMath.wrapDegrees(viewSession.yaw() - next.yaw())) <= config.auraDeadzone + .01
+                && Math.abs(viewSession.pitch() - next.pitch()) <= config.auraDeadzone + .01) {
+            viewSession.reset();
             auraStepper.reset(); returnStepper.reset();
         }
     }
 
+    private LivingEntity retainAuraTarget(MinecraftClient client, ClientConfig config,
+                                          LivingEntity candidate, double range) {
+        if (auraTarget == null || !eligible(client, config, auraTarget, range, true)
+                || !CombatMath.insideFov(client.player.getYaw(), rotation(client, config.auraAimPoint, auraTarget).yaw(), config.auraFov)) return candidate;
+        if (config.auraLockTarget || candidate == null || candidate == auraTarget) return auraTarget;
+        // A small nearest/health/FOV fluctuation must not swing the view between entities.
+        if ("HEALTH".equals(config.auraPriority)) {
+            return candidate.getHealth() + candidate.getAbsorptionAmount() + 2
+                    < auraTarget.getHealth() + auraTarget.getAbsorptionAmount() ? candidate : auraTarget;
+        }
+        if ("CROSSHAIR".equals(config.auraPriority)) {
+            double currentAngle = Math.abs(CombatMath.wrapDegrees(rotation(client, config.auraAimPoint, auraTarget).yaw() - client.player.getYaw()));
+            double nextAngle = Math.abs(CombatMath.wrapDegrees(rotation(client, config.auraAimPoint, candidate).yaw() - client.player.getYaw()));
+            return nextAngle + 10 < currentAngle ? candidate : auraTarget;
+        }
+        double currentDistance = Math.sqrt(distanceSquared(client.player.getEyePos(), auraTarget.getBoundingBox()));
+        double nextDistance = Math.sqrt(distanceSquared(client.player.getEyePos(), candidate.getBoundingBox()));
+        return nextDistance + 0.35 < currentDistance ? candidate : auraTarget;
+    }
+
+    private String noTargetStatus(ClientConfig config) {
+        if (!config.targetPlayers && !config.targetHostile && !config.targetPassive) return "Enable target filters";
+        if (!config.targetHostile && !config.targetPassive) return "No player in range/FOV (mobs off)";
+        return "No eligible target in range/FOV";
+    }
+
     private void clearAuraMotion() {
         auraTarget = null;
-        burstActive = false; savedView = false; returningView = false;
+        viewSession.reset();
         auraStepper.reset(); returnStepper.reset();
     }
 

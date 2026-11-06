@@ -1,9 +1,11 @@
-# Validation: 0.3.0
+# Validation: 0.4.0
 
 - Minecraft Java 1.21.4, Fabric Loader 0.16.10, Fabric API 0.119.2, Java 21.
-- Full Gradle build, remapped JAR and 34 tests passed; zero failures/skips.
-- Tests cover bounded accelerated rotations, yaw wrapping, deadzone, convergence, abrupt reversal, configuration migration, existing TriggerBot binds and Crit only values, plus the previous combat/movement/projection tests.
-- The critical-hit decision block in CombatController is identical to 0.2.0. FallTracker and the existing critical rules were not edited.
-- Actual client launched in a local test world. Snap and Smooth reduced a stationary cow's 100 HP to 92.5 and 95.5 respectively with Crit only enabled. Snap Legit reduced the same target from 100 to 97 HP. These are local-world checks, not claims about a remote server.
-- Menu rotation choices, optional TriggerBot Smooth aim, Ctrl+F search, module filtering and configuration persistence were exercised in-game. Screenshot: menu-0.3.0.png.
-- Test audio used OpenAL's null output. Remote server/anti-cheat behavior was not tested.
+- Full Gradle build and 51 tests pass, with no failures/skips. Tests cover combat camera sessions, stable crosshair dwell, rotation limits, configuration migration, geometry, jump detection, ambience, and earlier combat/movement/projection rules.
+- The critical-hit decision block is byte-for-byte identical to 0.3.0. FallTracker and existing key/mouse bindings were not changed.
+- The actual Minecraft client loaded all three WorldCustomizer mixins and entered a local test world.
+- With KillAura and AimAssist enabled together, a cow 4.1 blocks away remained outside melee range but was aimed at successfully; HUD showed Aiming and the server observed rotation[-13.928057,9.6659155].
+- Cube, Square, Circle and Points target effects were selected and rendered in-game; JumpCircle appeared on a real rising jump. WorldParticles rendered around the player.
+- With server time 18013, visual time 6000 showed daylight. Disabling WorldCustomizer restored real rainy nighttime. Server time/weather fields are not overwritten by the module.
+- Existing CritOnly combat attacks were exercised during the initial local-world smoke test. Remote server/anti-cheat behavior was not tested.
+- Audio used OpenAL null output. The cloud graphical test uses a virtual display/software OpenGL; its FPS is not a desktop performance benchmark.

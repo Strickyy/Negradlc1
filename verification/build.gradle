@@ -18,10 +18,14 @@ sourceSets {
             include 'dev/negradlc/combat/CombatMath.java'
             include 'dev/negradlc/combat/FallTracker.java'
             include 'dev/negradlc/combat/RotationStepper.java'
+            include 'dev/negradlc/combat/AuraViewSession.java'
+            include 'dev/negradlc/combat/TargetDwell.java'
             include 'dev/negradlc/movement/MovementMath.java'
             include 'dev/negradlc/input/BindingCodes.java'
             include 'dev/negradlc/input/WheelAccumulator.java'
             include 'dev/negradlc/visuals/ScreenProjection.java'
+            include 'dev/negradlc/visuals/EffectGeometry.java'
+            include 'dev/negradlc/visuals/AmbienceMath.java'
         }
     }
     test { java.srcDirs = ['../src/test/java'] }

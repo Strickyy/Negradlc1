@@ -2,6 +2,7 @@ package dev.negradlc.ui;
 
 import dev.negradlc.config.ClientConfig;
 import dev.negradlc.visuals.EspRenderer;
+import dev.negradlc.visuals.TargetEffects;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.LivingEntity;
@@ -29,18 +30,33 @@ public final class HudRenderer {
     public static void render(DrawContext draw, MinecraftClient client, ClientConfig config,
                               LivingEntity target, String status) {
         EspRenderer.renderHud(draw, client, config);
+        TargetEffects.renderHud(draw, client, config);
         combatStatus = status == null ? "" : status;
         if (!config.hud || client.player == null || client.options.hudHidden) return;
+        List<Bounds> occupied = new ArrayList<>();
         for (int widget = 0; widget < 3; widget++) {
             if (!enabled(config, widget) || (widget == 2 && target == null
                     && !config.killAura && !config.triggerBot && !config.aimAssist)) continue;
             double scale = MathHelper.clamp(scale(config, widget), 0.6, 2.0);
             int maxX = Math.max(0, client.getWindow().getScaledWidth() - (int) (width(widget) * scale));
             int maxY = Math.max(0, client.getWindow().getScaledHeight() - (int) (height(client, config, widget) * scale));
-            renderWidget(draw, client, config, target, widget,
-                    MathHelper.clamp(x(config, widget), 0, maxX),
-                    MathHelper.clamp(y(config, widget), 0, maxY), scale, false);
+            double left = MathHelper.clamp(x(config, widget), 0, maxX);
+            double top = MathHelper.clamp(y(config, widget), 0, maxY);
+            Bounds bounds = new Bounds(left, top, width(widget) * scale, height(client, config, widget) * scale);
+            if (config.hudAvoidOverlap && widget == 2 && overlaps(bounds, occupied)) {
+                Bounds alternative = new Bounds(Math.max(0, maxX - 12), top, bounds.width, bounds.height);
+                if (!overlaps(alternative, occupied)) { bounds = alternative; left = bounds.x; }
+            }
+            occupied.add(bounds);
+            renderWidget(draw, client, config, target, widget, left, top, scale, false);
         }
+    }
+
+    private record Bounds(double x, double y, double width, double height) {}
+    private static boolean overlaps(Bounds bounds, List<Bounds> occupied) {
+        return occupied.stream().anyMatch(other -> bounds.x < other.x + other.width + 4
+                && bounds.x + bounds.width + 4 > other.x && bounds.y < other.y + other.height + 4
+                && bounds.y + bounds.height + 4 > other.y);
     }
 
     static void renderWidget(DrawContext draw, MinecraftClient client, ClientConfig config,
@@ -120,6 +136,10 @@ public final class HudRenderer {
         if (config.airStrafe) modules.add("Air Strafe");
         if (config.airStag) modules.add("AirStag");
         if (config.fullbright) modules.add("Fullbright");
+        if (config.jumpCircle) modules.add("Jump Circle");
+        if (config.targetEffects) modules.add("Target Effects");
+        if (config.worldParticles) modules.add("World Particles");
+        if (config.worldCustomizer) modules.add("World Customizer");
         if (config.esp) modules.add("ESP");
         if (config.tracers) modules.add("Tracers");
         modules.sort(Comparator.comparingInt((String name) -> client.textRenderer.getWidth(name)).reversed());

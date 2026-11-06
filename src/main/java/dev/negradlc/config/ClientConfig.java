@@ -24,6 +24,16 @@ public final class ClientConfig {
     public double aimAcceleration = 2, aimDeadzone = 0.15;
     public boolean smoothTriggerAim;
     public double triggerAimFov = 30;
+    public int triggerDwellTicks;
+    public boolean jumpCircle, targetEffects, targetEffectCrosshair = true, targetEffectsThroughWalls = true;
+    public String targetEffectStyle = "CIRCLE";
+    public double jumpCircleRadius = 1.4, jumpCircleDuration = 1.2;
+    public double targetEffectSize = 1, targetEffectSpeed = 1;
+    public int jumpCircleColor = 0x57D9C0, targetEffectColor = 0x57D9C0;
+    public boolean worldParticles, worldCustomizer, customTimeEnabled = true, customWeatherEnabled = true, skyTintEnabled;
+    public String worldParticleStyle = "END_ROD", worldWeather = "CLEAR";
+    public double worldParticleDensity = 8, worldParticleRange = 8, skyTintStrength = 0.25;
+    public int worldTime = 6000, skyTintColor = 0x79B8FF;
     public boolean esp, tracers;
     public boolean espPlayers = true, espHostile, espPassive, espThroughWalls = true;
     public boolean espHealth = true, espNames = true;
@@ -37,6 +47,7 @@ public final class ClientConfig {
     public boolean sprint, airStrafe, airStag, fullbright;
     public double airControl = 0.08;
     public boolean hud = true, watermark = true, moduleList = true, targetHud = true;
+    public boolean hudAvoidOverlap = true;
     public double guiX = -1, guiY = -1, guiWidth = 540, guiHeight = 350, guiScale = 1;
     public HudLayout watermarkLayout = new HudLayout(12, 12, 1);
     public HudLayout modulesLayout = new HudLayout(12, 60, 1);
@@ -48,7 +59,8 @@ public final class ClientConfig {
     }
 
     public static final String[] MODULES = {
-        "killAura", "triggerBot", "aimAssist", "sprint", "airStag", "airStrafe", "esp", "tracers", "fullbright", "hud", "toggleSounds"
+        "killAura", "triggerBot", "aimAssist", "sprint", "airStag", "airStrafe", "esp", "tracers", "fullbright", "hud", "toggleSounds",
+        "jumpCircle", "targetEffects", "worldParticles", "worldCustomizer"
     };
 
     public static final class HudLayout {
@@ -69,6 +81,10 @@ public final class ClientConfig {
             case "esp" -> esp;
             case "tracers" -> tracers;
             case "toggleSounds" -> toggleSounds;
+            case "jumpCircle" -> jumpCircle;
+            case "targetEffects" -> targetEffects;
+            case "worldParticles" -> worldParticles;
+            case "worldCustomizer" -> worldCustomizer;
             default -> false;
         };
     }
@@ -86,6 +102,10 @@ public final class ClientConfig {
             case "esp" -> esp = !esp;
             case "tracers" -> tracers = !tracers;
             case "toggleSounds" -> toggleSounds = !toggleSounds;
+            case "jumpCircle" -> jumpCircle = !jumpCircle;
+            case "targetEffects" -> targetEffects = !targetEffects;
+            case "worldParticles" -> worldParticles = !worldParticles;
+            case "worldCustomizer" -> worldCustomizer = !worldCustomizer;
             default -> throw new IllegalArgumentException("Unknown module: " + module);
         }
     }
@@ -111,6 +131,21 @@ public final class ClientConfig {
         aimAcceleration = clamp(aimAcceleration, 0.1, 20, 2);
         aimDeadzone = clamp(aimDeadzone, 0, 2, 0.15);
         triggerAimFov = clamp(triggerAimFov, 5, 90, 30);
+        triggerDwellTicks = Math.max(0, Math.min(10, triggerDwellTicks));
+        targetEffectStyle = choice(targetEffectStyle, "CIRCLE", "CUBE", "SQUARE", "POINTS");
+        jumpCircleRadius = clamp(jumpCircleRadius, 0.5, 3, 1.4);
+        jumpCircleDuration = clamp(jumpCircleDuration, 0.4, 4, 1.2);
+        targetEffectSize = clamp(targetEffectSize, 0.5, 2.5, 1);
+        targetEffectSpeed = clamp(targetEffectSpeed, 0.1, 3, 1);
+        jumpCircleColor &= 0xFFFFFF;
+        targetEffectColor &= 0xFFFFFF;
+        worldParticleStyle = choice(worldParticleStyle, "END_ROD", "ENCHANT", "CHERRY");
+        worldWeather = choice(worldWeather, "CLEAR", "RAIN", "THUNDER");
+        worldParticleDensity = clamp(worldParticleDensity, 1, 40, 8);
+        worldParticleRange = clamp(worldParticleRange, 2, 24, 8);
+        worldTime = Math.max(0, Math.min(23999, worldTime));
+        skyTintStrength = clamp(skyTintStrength, 0, 1, 0.25);
+        skyTintColor &= 0xFFFFFF;
         espRange = clamp(espRange, 8, 192, 64);
         tracerRange = clamp(tracerRange, 8, 192, 64);
         espLineWidth = clamp(espLineWidth, 1, 4, 1.5);

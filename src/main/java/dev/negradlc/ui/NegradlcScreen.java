@@ -105,18 +105,18 @@ public final class NegradlcScreen extends Screen {
         switch (category) {
             case 0 -> {
                 Card aura = module("killAura", "KillAura", "Independent rotation and targeting", () -> config.killAura, () -> config.killAura = !config.killAura);
-                choice(aura, "Rotation", "Snap: turn only for attacks. Snap Legit: bounded burst. Smooth: continuous eased turn.",
+                choice(aura, "Rotation", "Snap: fast bounded acquire. Snap Legit: gentle acquire. Smooth: steady eased tracking.",
                         () -> modeName(config.auraRotation), () -> { config.auraRotation = next(config.auraRotation, "SNAP", "SNAP_LEGIT", "SMOOTH"); slider = null; });
-                note(aura, "Turns only for hits", "Instant rotation near attack readiness; does not follow during recharge").visible = () -> "SNAP".equals(config.auraRotation);
-                note(aura, "Bounded attack bursts", "Limited turn bursts with optional return; independent of Aim Assist").visible = () -> "SNAP_LEGIT".equals(config.auraRotation);
+                note(aura, "Fast, stable acquire", "Bounded rotation holds the target; no camera reset after each hit").visible = () -> "SNAP".equals(config.auraRotation);
+                note(aura, "Gentle, stable acquire", "Limited acceleration and stable tracking avoid repeated camera swings").visible = () -> "SNAP_LEGIT".equals(config.auraRotation);
                 note(aura, "Continuous eased turn", "Smooth acceleration and a stable target; independent of Aim Assist").visible = () -> "SMOOTH".equals(config.auraRotation);
                 choice(aura, "Aim point", "Body point used only by KillAura", () -> config.auraAimPoint, () -> config.auraAimPoint = next(config.auraAimPoint, "CHEST", "HEAD", "NEAREST"));
-                range(aura, "Yaw speed", "Maximum horizontal rotation in degrees per tick", 1, 90, 1, () -> config.auraYawSpeed, v -> config.auraYawSpeed = v).visible = () -> !"SNAP".equals(config.auraRotation);
-                range(aura, "Pitch speed", "Maximum vertical rotation in degrees per tick", 1, 90, 1, () -> config.auraPitchSpeed, v -> config.auraPitchSpeed = v).visible = () -> !"SNAP".equals(config.auraRotation);
-                range(aura, "Smoothing", "Turn easing; lower values feel softer", .05, 1, .05, () -> config.auraSmoothing, v -> config.auraSmoothing = v).visible = () -> !"SNAP".equals(config.auraRotation);
-                range(aura, "Acceleration", "Maximum change of turn speed per tick", .5, 30, .5, () -> config.auraAcceleration, v -> config.auraAcceleration = v).visible = () -> "SMOOTH".equals(config.auraRotation);
-                range(aura, "Deadzone", "Stop tiny rotations near the target", 0, 2, .05, () -> config.auraDeadzone, v -> config.auraDeadzone = v).visible = () -> !"SNAP".equals(config.auraRotation);
-                toggle(aura, "Return view", "Return to your original view after an attack", () -> config.auraReturnView, () -> config.auraReturnView = !config.auraReturnView).visible = () -> !"SMOOTH".equals(config.auraRotation);
+                range(aura, "Yaw speed", "Horizontal rotation limit; Snap applies its own fast bounded profile", 1, 90, 1, () -> config.auraYawSpeed, v -> config.auraYawSpeed = v);
+                range(aura, "Pitch speed", "Vertical rotation limit; every mode avoids instant pitch jumps", 1, 90, 1, () -> config.auraPitchSpeed, v -> config.auraPitchSpeed = v);
+                range(aura, "Smoothing", "Turn easing; lower values feel softer", .05, 1, .05, () -> config.auraSmoothing, v -> config.auraSmoothing = v);
+                range(aura, "Acceleration", "Maximum change of turn speed per tick", .5, 30, .5, () -> config.auraAcceleration, v -> config.auraAcceleration = v);
+                range(aura, "Deadzone", "Stop tiny rotations near the target", 0, 2, .05, () -> config.auraDeadzone, v -> config.auraDeadzone = v);
+                toggle(aura, "Return view", "Smooth one-time return after losing the target or disabling Aura; never after each hit", () -> config.auraReturnView, () -> config.auraReturnView = !config.auraReturnView).visible = () -> !"SMOOTH".equals(config.auraRotation);
                 toggle(aura, "Lock target", "Keep the same valid target instead of switching every tick", () -> config.auraLockTarget, () -> config.auraLockTarget = !config.auraLockTarget);
                 choice(aura, "Priority", "Choose the nearest, closest to crosshair, or lowest-health target", () -> priorityName(config.auraPriority), () -> config.auraPriority = next(config.auraPriority, "DISTANCE", "CROSSHAIR", "HEALTH"));
                 toggle(aura, "Crit only", "Only attack while falling; grounded hits wait", () -> config.critOnly, () -> config.critOnly = !config.critOnly);
@@ -124,7 +124,7 @@ public final class NegradlcScreen extends Screen {
                 range(aura, "Distance", "Melee reach in blocks", 1, 3, .1, () -> config.attackRange, v -> config.attackRange = v);
                 range(aura, "Recharge", "Wait for this fraction of vanilla attack cooldown", .1, 1, .01, () -> config.attackCooldown, v -> config.attackCooldown = v);
                 range(aura, "Field of view", "Target selection cone in degrees", 10, 360, 5, () -> config.auraFov, v -> config.auraFov = v);
-                Card aim = module("aimAssist", "Aim Assist", "Independent yaw / pitch control", () -> config.aimAssist, () -> config.aimAssist = !config.aimAssist);
+                Card aim = module("aimAssist", "Aim Assist", "Smooth aim with clear activation", () -> config.aimAssist, () -> config.aimAssist = !config.aimAssist);
                 choice(aim, "Aim point", "Body point towards which the camera turns", () -> config.aimPoint, () -> config.aimPoint = next(config.aimPoint, "CHEST", "HEAD", "NEAREST"));
                 range(aim, "Distance", "Maximum aiming distance in blocks", 1, 8, .1, () -> config.aimRange, v -> config.aimRange = v);
                 range(aim, "Field of view", "Horizontal cone in degrees", 5, 180, 5, () -> config.aimFov, v -> config.aimFov = v);
@@ -133,12 +133,14 @@ public final class NegradlcScreen extends Screen {
                 range(aim, "Smoothing", "Blend of turn towards the target", .05, 1, .05, () -> config.aimSmoothing, v -> config.aimSmoothing = v);
                 range(aim, "Acceleration", "Maximum change of aim turn speed per tick", .1, 15, .1, () -> config.aimAcceleration, v -> config.aimAcceleration = v);
                 range(aim, "Deadzone", "Stop tiny aim corrections at the target", 0, 2, .05, () -> config.aimDeadzone, v -> config.aimDeadzone = v);
-                toggle(aim, "Hold attack", "Assist only while holding the attack key", () -> config.requireAttackKey, () -> config.requireAttackKey = !config.requireAttackKey);
+                toggle(aim, "Hold attack", "ON: hold your attack key to aim. OFF: assist whenever a valid target is in the cone", () -> config.requireAttackKey, () -> config.requireAttackKey = !config.requireAttackKey);
+                note(aim, "Check Targets", "Mobs are excluded by default; choose players or mobs in shared Targets");
                 toggle(aim, "Visible only", "Ignore targets hidden by blocks when aiming", () -> config.aimVisibleOnly, () -> config.aimVisibleOnly = !config.aimVisibleOnly);
                 toggle(aim, "Target lock", "Keep a valid target instead of switching between nearby entities", () -> config.aimLockTarget, () -> config.aimLockTarget = !config.aimLockTarget);
                 Card trigger = module("triggerBot", "TriggerBot", "Target must be under the crosshair", () -> config.triggerBot, () -> config.triggerBot = !config.triggerBot);
                 toggle(trigger, "Smooth aim", "Optional pre-aim uses Aim Assist settings, including Hold attack; attacks still require the crosshair", () -> config.smoothTriggerAim, () -> config.smoothTriggerAim = !config.smoothTriggerAim);
                 range(trigger, "Aim cone", "Smooth pre-aim cone; uses Aim Assist speed and smoothing settings", 5, 90, 5, () -> config.triggerAimFov, v -> config.triggerAimFov = v).visible = () -> config.smoothTriggerAim;
+                range(trigger, "Target dwell", "Ticks the same valid target must stay under your crosshair; 0 attacks immediately", 0, 10, 1, () -> config.triggerDwellTicks, v -> config.triggerDwellTicks = (int) Math.round(v));
                 toggle(trigger, "Crit only", "Shared with KillAura: waits for a real falling crit", () -> config.critOnly, () -> config.critOnly = !config.critOnly);
                 toggle(trigger, "Auto crit jump", "Shared automatic jump for critical attacks", () -> config.autoCritJump, () -> config.autoCritJump = !config.autoCritJump);
                 range(trigger, "Recharge", "Shared vanilla attack cooldown threshold", .1, 1, .01, () -> config.attackCooldown, v -> config.attackCooldown = v);
@@ -159,6 +161,30 @@ public final class NegradlcScreen extends Screen {
                 note(sprint, "Smart release", "Combat can stop sprint for critical hits");
             }
             case 2 -> {
+                Card circles = module("jumpCircle", "Jump Circle", "Fading rings at your jump takeoff", () -> config.jumpCircle, () -> config.jumpCircle = !config.jumpCircle);
+                range(circles, "Radius", "Maximum expanding ring radius in blocks", .5, 3, .1, () -> config.jumpCircleRadius, v -> config.jumpCircleRadius = v);
+                range(circles, "Duration", "Ring lifetime in seconds", .4, 4, .1, () -> config.jumpCircleDuration, v -> config.jumpCircleDuration = v);
+                choice(circles, "Color", "Cycle the jump ring palette", () -> colorName(config.jumpCircleColor), () -> config.jumpCircleColor = nextColor(config.jumpCircleColor));
+                Card target = module("targetEffects", "Target Effects", "Animated target shapes and points", () -> config.targetEffects, () -> config.targetEffects = !config.targetEffects);
+                choice(target, "Style", "Cube wireframe, facing square, orbiting circle, or a system of points", () -> targetStyleName(config.targetEffectStyle), () -> config.targetEffectStyle = next(config.targetEffectStyle, "CUBE", "SQUARE", "CIRCLE", "POINTS"));
+                toggle(target, "Crosshair target", "Also show effects on a living entity under the crosshair when combat has no target", () -> config.targetEffectCrosshair, () -> config.targetEffectCrosshair = !config.targetEffectCrosshair);
+                toggle(target, "Through walls", "Show the selected target effect behind blocks", () -> config.targetEffectsThroughWalls, () -> config.targetEffectsThroughWalls = !config.targetEffectsThroughWalls);
+                range(target, "Size", "Scale of the target shape", .5, 2, .1, () -> config.targetEffectSize, v -> config.targetEffectSize = v);
+                range(target, "Animation speed", "Speed of target animation", .2, 3, .1, () -> config.targetEffectSpeed, v -> config.targetEffectSpeed = v);
+                choice(target, "Color", "Cycle the target effect palette", () -> colorName(config.targetEffectColor), () -> config.targetEffectColor = nextColor(config.targetEffectColor));
+                Card particles = module("worldParticles", "World Particles", "Ambient particles around you", () -> config.worldParticles, () -> config.worldParticles = !config.worldParticles);
+                choice(particles, "Style", "Choose soft End Rod, Enchant or Cherry particles", () -> particleStyleName(config.worldParticleStyle), () -> config.worldParticleStyle = next(config.worldParticleStyle, "END_ROD", "ENCHANT", "CHERRY"));
+                range(particles, "Density", "Client particles spawned per second", 1, 30, 1, () -> config.worldParticleDensity, v -> config.worldParticleDensity = v);
+                range(particles, "Range", "Particle radius around the player in blocks", 2, 16, .5, () -> config.worldParticleRange, v -> config.worldParticleRange = v);
+                Card world = module("worldCustomizer", "World Customizer", "Local time, weather and sky tint", () -> config.worldCustomizer, () -> config.worldCustomizer = !config.worldCustomizer);
+                toggle(world, "Custom time", "Override the visible client time; server time is preserved", () -> config.customTimeEnabled, () -> config.customTimeEnabled = !config.customTimeEnabled);
+                choice(world, "Time preset", "Cycle Day, Sunset and Night", () -> timePresetName(config.worldTime), () -> config.worldTime = nextTimePreset(config.worldTime));
+                range(world, "Time", "Local day time in Minecraft ticks", 0, 23999, 100, () -> config.worldTime, v -> config.worldTime = (int) Math.round(v)).visible = () -> config.customTimeEnabled;
+                toggle(world, "Custom weather", "Override only client weather; disabling restores the live server weather", () -> config.customWeatherEnabled, () -> config.customWeatherEnabled = !config.customWeatherEnabled);
+                choice(world, "Weather", "Choose Clear, Rain or Thunder", () -> weatherName(config.worldWeather), () -> config.worldWeather = next(config.worldWeather, "CLEAR", "RAIN", "THUNDER"));
+                toggle(world, "Sky tint", "Blend a chosen color into the visible sky", () -> config.skyTintEnabled, () -> config.skyTintEnabled = !config.skyTintEnabled);
+                choice(world, "Sky color", "Cycle the sky tint palette", () -> colorName(config.skyTintColor), () -> config.skyTintColor = nextColor(config.skyTintColor));
+                range(world, "Tint strength", "Amount of sky color blending", 0, 1, .05, () -> config.skyTintStrength, v -> config.skyTintStrength = v).visible = () -> config.skyTintEnabled;
                 Card esp = module("esp", "ESP", "Entity outlines and information", () -> config.esp, () -> config.esp = !config.esp);
                 toggle(esp, "Players", "Show player boxes", () -> config.espPlayers, () -> config.espPlayers = !config.espPlayers);
                 toggle(esp, "Hostile mobs", "Show monster boxes", () -> config.espHostile, () -> config.espHostile = !config.espHostile);
@@ -180,6 +206,7 @@ public final class NegradlcScreen extends Screen {
                 toggle(hud, "Watermark", "Show client identity", () -> config.watermark, () -> config.watermark = !config.watermark);
                 toggle(hud, "Module list", "Show active modules", () -> config.moduleList, () -> config.moduleList = !config.moduleList);
                 toggle(hud, "Target HUD", "Show target health and distance", () -> config.targetHud, () -> config.targetHud = !config.targetHud);
+                toggle(hud, "Avoid overlap", "Move Target HUD aside if it overlaps the module list", () -> config.hudAvoidOverlap, () -> config.hudAvoidOverlap = !config.hudAvoidOverlap);
                 action(hud, "Edit HUD layout", "Move and resize individual HUD widgets", () -> { if (client != null) client.setScreen(new HudEditorScreen(config, save)); });
                 module("fullbright", "Fullbright", "Brighten dark areas", () -> config.fullbright, () -> config.fullbright = !config.fullbright);
             }
@@ -364,6 +391,21 @@ public final class NegradlcScreen extends Screen {
     }
     private static String priorityName(String priority) {
         return switch (priority) { case "CROSSHAIR" -> "Crosshair"; case "HEALTH" -> "Health"; default -> "Distance"; };
+    }
+    private static String targetStyleName(String style) {
+        return switch (style) { case "CUBE" -> "Cube"; case "SQUARE" -> "Square"; case "POINTS" -> "Points"; default -> "Circle"; };
+    }
+    private static String particleStyleName(String style) {
+        return switch (style) { case "ENCHANT" -> "Enchant"; case "CHERRY" -> "Cherry"; default -> "End Rod"; };
+    }
+    private static String weatherName(String weather) {
+        return switch (weather) { case "RAIN" -> "Rain"; case "THUNDER" -> "Thunder"; default -> "Clear"; };
+    }
+    private static String timePresetName(int time) {
+        return switch (time) { case 6000 -> "Day"; case 12000 -> "Sunset"; case 18000 -> "Night"; default -> "Custom"; };
+    }
+    private static int nextTimePreset(int time) {
+        return switch (time) { case 6000 -> 12000; case 12000 -> 18000; default -> 6000; };
     }
     private static String format(Control c) { return String.format(Locale.ROOT, c.step >= 1 ? "%.0f" : c.step >= .1 ? "%.1f" : "%.2f", c.value.getAsDouble()); }
     private static String next(String current, String... values) {

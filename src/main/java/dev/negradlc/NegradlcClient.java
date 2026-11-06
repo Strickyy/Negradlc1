@@ -8,6 +8,8 @@ import dev.negradlc.movement.MovementController;
 import dev.negradlc.ui.HudRenderer;
 import dev.negradlc.ui.NegradlcScreen;
 import dev.negradlc.visuals.EspRenderer;
+import dev.negradlc.visuals.TargetEffects;
+import dev.negradlc.visuals.WorldAmbience;
 import dev.negradlc.sound.SoundFeedback;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -53,10 +55,15 @@ public final class NegradlcClient implements ClientModInitializer {
             }
             movement.tick(client, config);
             combat.tick(client, config);
+            TargetEffects.tick(client, config, combat.getTarget());
+            WorldAmbience.tick(client, config);
         });
         HudRenderCallback.EVENT.register((context, tickCounter) ->
             HudRenderer.render(context, net.minecraft.client.MinecraftClient.getInstance(), config, combat.getTarget(), combat.getStatus()));
-        WorldRenderEvents.LAST.register(context -> EspRenderer.render(context, config));
+        WorldRenderEvents.LAST.register(context -> {
+            EspRenderer.render(context, config);
+            TargetEffects.capture(context, config);
+        });
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             movement.reset();
             combat.reset();

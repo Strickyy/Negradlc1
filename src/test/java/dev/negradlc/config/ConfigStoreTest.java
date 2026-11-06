@@ -116,4 +116,58 @@ class ConfigStoreTest {
         assertTrue(config.critOnly);
         assertTrue(config.autoCritJump);
     }
+
+    @Test void visualCustomizationRoundTripsWithoutChangingCritsOrBindings() {
+        var store = new ConfigStore(directory.resolve("visuals.json"));
+        var config = new ClientConfig();
+        config.critOnly = true;
+        config.autoCritJump = false;
+        config.binds.put("triggerBot", 290);
+        config.jumpCircle = true;
+        config.targetEffects = true;
+        config.targetEffectStyle = "POINTS";
+        config.targetEffectColor = 0xAA88CC;
+        config.worldParticles = true;
+        config.worldParticleStyle = "CHERRY";
+        config.worldCustomizer = true;
+        config.worldWeather = "THUNDER";
+        config.worldTime = 18000;
+        config.skyTintEnabled = true;
+        config.skyTintStrength = 0.4;
+        store.save(config);
+        var loaded = store.load();
+        assertTrue(loaded.jumpCircle);
+        assertTrue(loaded.targetEffects);
+        assertEquals("POINTS", loaded.targetEffectStyle);
+        assertEquals(0xAA88CC, loaded.targetEffectColor);
+        assertEquals("CHERRY", loaded.worldParticleStyle);
+        assertEquals("THUNDER", loaded.worldWeather);
+        assertEquals(18000, loaded.worldTime);
+        assertEquals(0.4, loaded.skyTintStrength);
+        assertTrue(loaded.critOnly);
+        assertFalse(loaded.autoCritJump);
+        assertEquals(290, loaded.binds.get("triggerBot"));
+    }
+
+    @Test void malformedVisualOptionsAreRepairedAndNewModulesStayOptIn() throws Exception {
+        Path file = directory.resolve("visuals.json");
+        Files.writeString(file, """
+            {"targetEffectStyle":"bad","jumpCircleDuration":-10,"worldParticleDensity":999,
+             "worldParticleStyle":null,"worldWeather":"bad","worldTime":90000,
+             "skyTintStrength":2,"triggerDwellTicks":-5,"critOnly":true}
+            """);
+        var config = new ConfigStore(file).load();
+        assertEquals("CIRCLE", config.targetEffectStyle);
+        assertEquals(0.4, config.jumpCircleDuration);
+        assertEquals(40, config.worldParticleDensity);
+        assertEquals("END_ROD", config.worldParticleStyle);
+        assertEquals("CLEAR", config.worldWeather);
+        assertEquals(23999, config.worldTime);
+        assertEquals(1, config.skyTintStrength);
+        assertEquals(0, config.triggerDwellTicks);
+        assertFalse(config.jumpCircle);
+        assertFalse(config.worldCustomizer);
+        assertTrue(config.critOnly);
+        assertEquals(-1, config.binds.get("worldCustomizer"));
+    }
 }
